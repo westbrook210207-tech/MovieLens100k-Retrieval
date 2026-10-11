@@ -46,6 +46,17 @@ def _raw_frames():
     return ratings, users, items
 
 
+def test_release_year_is_standard_scaled_and_a_missing_year_gets_the_mean():
+    _, users, _ = _raw_frames()
+    items = pd.DataFrame({"item_id": [1, 2, 3], "title": ["A", "B", "C"],
+                          "release_date": ["01-Jan-1990", None, "01-Jan-2000"], "Drama": [1, 0, 1]})
+    _, features, mappings = build_features(users, items, ["Drama"])
+    assert features["release_year_scaled"].tolist() == pytest.approx([-1, 0, 1])  # mean 1995, std 5
+    assert (mappings["release_year_mean"], mappings["release_year_std"]) == pytest.approx((1995, 5))
+    assert features["release_year"].isna().tolist() == [False, True, False]  # raw year is kept as it was
+    assert "year_bucket" not in features.columns
+
+
 def test_validate_rejects_unknown_gender():
     ratings, users, items = _raw_frames()
     validate(ratings, users, items)
@@ -61,9 +72,15 @@ def test_user_features_are_one_hot_and_zip_maps_to_region():
     assert features["is_male"].tolist() == [1, 0, 0]
     non_us = len(ZIP_REGIONS) - 1
     assert features["zip_region"].tolist() == [8, non_us, non_us]
-    for prefix in ("age_bucket_", "occupation_", "zip_region_"):
+    for prefix in ("occupation_", "zip_region_"):
         columns = [c for c in features.columns if c.startswith(prefix)]
         assert (features[columns].sum(axis=1) == 1).all(), prefix
+    # Age is standard-scaled into one column (ages 24, 53, 30), not bucketed; raw age is kept.
+    assert not [c for c in features.columns if c.startswith("age_bucket")]
+    assert features["age_scaled"].mean() == pytest.approx(0) and features["age_scaled"].std(ddof=0) == pytest.approx(1)
+    assert features["age_scaled"].argsort().tolist() == features["age"].argsort().tolist()  # order preserved
+    scaled_back = features["age_scaled"] * mappings["age_std"] + mappings["age_mean"]
+    assert scaled_back.tolist() == pytest.approx([24, 53, 30])
     assert mappings["occupations"] == ["artist", "writer"]
 
 

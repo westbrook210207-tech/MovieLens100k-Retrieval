@@ -78,7 +78,7 @@ class TwoTower(nn.Module):
     and the saved state dict carries exactly the features the model was trained with."""
 
     def __init__(self, user_categorical: Tensor, user_dense: Tensor, item_categorical: Tensor,
-                 item_genres: Tensor,
+                 item_dense: Tensor,
                  user_cardinalities: list[int], item_cardinalities: list[int],
                  embedding_dim: int = 64, feature_dim: int = 8, hidden_dim: int = 128,
                  dropout: float = 0.1, num_hidden_layers: int = 1) -> None:
@@ -86,17 +86,17 @@ class TwoTower(nn.Module):
         self.register_buffer("user_categorical", user_categorical)
         self.register_buffer("user_dense", user_dense)
         self.register_buffer("item_categorical", item_categorical)
-        self.register_buffer("item_genres", item_genres)
+        self.register_buffer("item_dense", item_dense)  # (n_items, n_genres + 1): genre flags + scaled release year
         self.user_tower = Tower(user_cardinalities, user_dense.shape[1], embedding_dim, feature_dim,
                                 hidden_dim, dropout, num_hidden_layers)
-        self.item_tower = Tower(item_cardinalities, item_genres.shape[1], embedding_dim, feature_dim,
+        self.item_tower = Tower(item_cardinalities, item_dense.shape[1], embedding_dim, feature_dim,
                                 hidden_dim, dropout, num_hidden_layers)
 
     def encode_users(self, user_idx: Tensor) -> Tensor:
         return self.user_tower(self.user_categorical[user_idx], self.user_dense[user_idx])
 
     def encode_items(self, item_idx: Tensor) -> Tensor:
-        return self.item_tower(self.item_categorical[item_idx], self.item_genres[item_idx])
+        return self.item_tower(self.item_categorical[item_idx], self.item_dense[item_idx])
 
 
 def info_nce(user_vectors: Tensor, item_vectors: Tensor, temperature: float,
@@ -145,7 +145,7 @@ def load_model(artifact_dir: Path) -> tuple[TwoTower, dict]:
         torch.zeros((n_users, len(meta["user_cardinalities"])), dtype=torch.long),
         torch.zeros((n_users, meta["user_dense_dim"])),
         torch.zeros((n_items, len(meta["item_cardinalities"])), dtype=torch.long),
-        torch.zeros((n_items, len(meta["genres"]))),
+        torch.zeros((n_items, meta["item_dense_dim"])),
         meta["user_cardinalities"], meta["item_cardinalities"], **meta["model_config"],
     )
     model.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))

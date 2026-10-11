@@ -73,14 +73,18 @@ def build_model(users: pd.DataFrame, items: pd.DataFrame, mappings: dict, model_
     """Turn the prepared feature tables into tensors (row i = user_idx / item_idx i) and build the model."""
     genres = mappings["genres"]
     user_categorical = torch.tensor(users[["user_idx"]].to_numpy())
-    age_columns = [f"age_bucket_{i}" for i in range(len(mappings["age_bins"]) + 1)]
+    # Age is one standard-scaled number (mean 0, std 1; see build_features in prepare.py),
+    # the only user feature column that is not 0/1.
+    age_columns = ["age_scaled"]
     occupation_columns = [f"occupation_{name}" for name in mappings["occupations"]]
     region_columns = [f"zip_region_{i}" for i in range(len(mappings["zip_regions"]))]
     user_dense = torch.from_numpy(users[["is_male"] + age_columns + occupation_columns + region_columns].to_numpy()).float()
-    item_categorical = torch.from_numpy(items[["item_idx", "year_bucket"]].to_numpy())
-    item_genres = torch.from_numpy(items[genres].to_numpy()).float()
+    # Only the film ID is embedded. The release year is one standard-scaled number
+    # (see build_features in prepare.py) fed in next to the 0/1 genre flags.
+    item_categorical = torch.from_numpy(items[["item_idx"]].to_numpy())  # (n_items, 1)
+    item_dense = torch.from_numpy(items[genres + ["release_year_scaled"]].to_numpy()).float()  # (n_items, 20)
     return TwoTower(
-        user_categorical, user_dense, item_categorical, item_genres,
+        user_categorical, user_dense, item_categorical, item_dense,
         user_cardinalities=(user_categorical.max(dim=0).values + 1).tolist(),
         item_cardinalities=(item_categorical.max(dim=0).values + 1).tolist(),
         **model_config,
@@ -177,6 +181,7 @@ def main() -> None:
             "user_cardinalities": [e.num_embeddings for e in model.user_tower.embeddings],
             "user_dense_dim": model.user_dense.shape[1],
             "item_cardinalities": [e.num_embeddings for e in model.item_tower.embeddings],
+            "item_dense_dim": model.item_dense.shape[1],
             "user_ids": mappings["user_ids"],
             "item_ids": mappings["item_ids"],
             "genres": mappings["genres"],

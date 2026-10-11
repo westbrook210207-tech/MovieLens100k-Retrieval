@@ -14,8 +14,8 @@ rank. If yours differs, section 1 still maps over.
 
 | | Recall@10 | Recall@200 |
 |---|---|---|
-| Two-tower, validation | 0.190 | 0.802 |
-| Two-tower, test | 0.134 | 0.733 |
+| Two-tower, validation | 0.191 | 0.792 |
+| Two-tower, test | 0.126 | 0.722 |
 | Most-popular baseline, validation | 0.072 | 0.521 |
 | Most-popular baseline, test | 0.068 | 0.464 |
 
@@ -114,8 +114,8 @@ Code: `Tower` and `TwoTower` in `training/models/two_tower.py`.
 | Tower | Piece | Width | Enters as |
 |---|---|---|---|
 | User | User ID | 64 | embedding, 943 rows |
-| User | Gender, age bucket (7), occupation (21), zip region (11) | 40 | raw 0/1 columns |
-| User | **Total** | **104** | |
+| User | Gender (1), standard-scaled age (1), occupation (21), zip region (11) | 34 | raw numbers: 0/1 columns plus the scaled age |
+| User | **Total** | **98** | |
 | Item | Film ID | 64 | embedding, 1,682 rows |
 | Item | Release-year bucket | 8 | embedding, 9 rows |
 | Item | Genres (multi-hot) | 19 | raw 0/1 columns |
@@ -129,16 +129,16 @@ training has no useful vector (section 13).
 ### Layers
 
 ```text
-User:  104 -> Linear 256 -> ReLU -> Dropout 0.1 -> Linear 256 -> ReLU -> Dropout 0.1 -> Linear 64 -> L2-normalise
+User:   98 -> Linear 256 -> ReLU -> Dropout 0.1 -> Linear 256 -> ReLU -> Dropout 0.1 -> Linear 64 -> L2-normalise
 Item:   91 -> Linear 256 -> ReLU -> Dropout 0.1 -> Linear 256 -> ReLU -> Dropout 0.1 -> Linear 64 -> L2-normalise
 ```
 
-About 383K parameters; 168K of them are the ID embedding tables.
+About 381K parameters; 168K of them are the ID embedding tables.
 
 The literal numbers are not in the model file because the MLP is built in a loop:
 
 ```python
-width = sum(sizes) + dense_dim           # 104 for users, 91 for items
+width = sum(sizes) + dense_dim           # 98 for users, 91 for items
 for _ in range(num_hidden_layers):       # --num-hidden-layers, default 2
     layers += [nn.Linear(width, hidden_dim), nn.ReLU(), nn.Dropout(dropout)]   # --hidden-dim, default 256
     width = hidden_dim
@@ -446,6 +446,9 @@ size it is not. The embeddings and the negative sampling are.
 
 ## 10. Hyperparameter search
 
+*This search was run with the earlier 7-bucket age one-hot (user input 104 wide). The
+scaled-age model was not re-searched.*
+
 **Method.** One setting at a time, three seeds each, temporal split, MPS. A value replaced
 the current one only if it raised mean validation Recall@200 by at least 0.005. About 130
 runs. Each row compares against the value in force at that stage.
@@ -490,20 +493,21 @@ Negative sampling inside the same search (learning rate 0.003, batch 1024):
 
 ## 11. Final results
 
-Default settings, seed 0, MLflow run `4a45908b9a1a40fcac45156e784da9b9`.
+Default settings, seed 0, age as one standard-scaled column, MLflow run
+`f3bcb2c38026448c80231a003703a73c`.
 
 | Split | Model | Recall@10 | NDCG@10 | Recall@20 | Recall@200 | NDCG@200 |
 |---|---|---|---|---|---|---|
-| Validation | Two-tower | 0.1900 | 0.0963 | 0.2813 | 0.8015 | 0.2068 |
+| Validation | Two-tower | 0.1911 | 0.0978 | 0.3025 | 0.7919 | 0.2074 |
 | Validation | Popularity | 0.0722 | 0.0385 | 0.1253 | 0.5212 | 0.1164 |
-| Test | Two-tower | 0.1338 | 0.0697 | 0.2176 | 0.7325 | 0.1761 |
+| Test | Two-tower | 0.1263 | 0.0650 | 0.2038 | 0.7219 | 0.1708 |
 | Test | Popularity | 0.0679 | 0.0348 | 0.1083 | 0.4639 | 0.1017 |
 
 Caveats:
 
 - **Validation is optimistic.** The checkpoint, the stopping epoch and every hyperparameter
   were chosen on it. Quote the test row.
-- **Test has been scored three times** in this work, for three successive models. No choice
+- **Test has been scored four times** in this work, for four successive models. No choice
   was made from it, but it is not a perfectly untouched estimate.
 - **Test is lower than validation** by about seven points. The test film is one step further
   into the future, and 17 test targets (against 7 validation targets) are films with no
@@ -545,7 +549,8 @@ The pipeline code existed before this work but had never been trained.
 | 7 | 128 -> 256 -> 128 -> 128 tested | experiment | Worse; code removed |
 | 8 | Checkpoint selection and early stopping on Recall@200 | `train.py` | Was NDCG@10 |
 | 9 | Hyperparameter search | experiments | Learning rate 0.003, batch 256 |
-| 10 | Tests for split, sampler, loss, metrics, save/load | `tests/test_training.py` | 48 tests pass |
+| 10 | Tests for split, sampler, loss, metrics, save/load | `tests/test_training.py` | passing |
+| 11 | Age: 7-bucket one-hot replaced by one `StandardScaler` column | `prepare.py`, `train.py` | Tie: Recall@200 0.7983 ± 0.0057 against 0.8001 ± 0.0044 (seeds 0/1/2); user input 104 -> 98 |
 
 ---
 

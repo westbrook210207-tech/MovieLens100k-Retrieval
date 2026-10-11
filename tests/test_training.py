@@ -103,8 +103,8 @@ def test_save_and_load_round_trip(tmp_path, depth):
     model = TwoTower(user_categorical, torch.rand(3, 6), item_categorical, torch.rand(5, 7),
                      user_cardinalities=[3], item_cardinalities=[5, 3], **model_config).eval()
     meta = {"model_config": model_config, "user_cardinalities": [3], "user_dense_dim": 6,
-            "item_cardinalities": [5, 3], "user_ids": [1, 2, 3], "item_ids": [1, 2, 3, 4, 5],
-            "genres": list("abcdefg")}
+            "item_cardinalities": [5, 3], "item_dense_dim": 7, "user_ids": [1, 2, 3],
+            "item_ids": [1, 2, 3, 4, 5], "genres": list("abcdefg")}
     save_model(model, meta, tmp_path)
     loaded, loaded_meta = load_model(tmp_path)
     assert loaded_meta == meta

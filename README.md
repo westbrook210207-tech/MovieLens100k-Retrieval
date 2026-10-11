@@ -132,7 +132,7 @@ get two fixes, both from training data only:
 
 Each tower is `inputs → [Linear → ReLU → Dropout] × --num-hidden-layers → Linear → L2-normalise`,
 every hidden layer `--hidden-dim` wide. Default: two hidden layers of 256
-(user 104 → 256 → 256 → 64, item 91 → 256 → 256 → 64).
+(user 98 → 256 → 256 → 64, item 91 → 256 → 256 → 64).
 
 ## Model selection and hyperparameters
 
@@ -182,22 +182,28 @@ combining the near-miss values (weight decay 0.01, dropout 0.3, patience 10).
 
 ## Exported model
 
-Default settings, seed 0, trained on MPS. The test split has been scored three times in total
-(for two earlier models as well); every choice was made on validation, but the test numbers
-are not a fully untouched estimate.
+Default settings, seed 0, trained on MPS, with age as one standard-scaled column. The test
+split has been scored four times in total (for three earlier models as well); every choice was
+made on validation, but the test numbers are not a fully untouched estimate.
 
 | Split | Model | NDCG@10 | Recall@10 | Recall@20 | Recall@200 | NDCG@200 | Precision@200 |
 |---|---|---|---|---|---|---|---|
-| Validation | Two-tower | 0.0963 | 0.1900 | 0.2813 | 0.8015 | 0.2068 | 0.0040 |
+| Validation | Two-tower | 0.0978 | 0.1911 | 0.3025 | 0.7919 | 0.2074 | 0.0040 |
 | Validation | Popularity | 0.0385 | 0.0722 | 0.1253 | 0.5212 | 0.1164 | 0.0026 |
-| Test | Two-tower | 0.0697 | 0.1338 | 0.2176 | 0.7325 | 0.1761 | 0.0037 |
+| Test | Two-tower | 0.0650 | 0.1263 | 0.2038 | 0.7219 | 0.1708 | 0.0036 |
 | Test | Popularity | 0.0348 | 0.0679 | 0.1083 | 0.4639 | 0.1017 | 0.0023 |
 
 ## User features
 
-Only the user ID is embedded. Everything else goes into the user tower as 0/1 columns:
-`is_male` (F → 0, M → 1), a 7-bucket age one-hot, a 21-way occupation one-hot and an
+Only the user ID is embedded. Everything else goes into the user tower as plain numbers,
+34 columns: `is_male` (F → 0, M → 1), `age_scaled`, a 21-way occupation one-hot and an
 11-way zip-region one-hot (first digit of a US zip code; anything else is "Non-US / unknown").
+
+`age_scaled` is the age standardised with sklearn's `StandardScaler` (mean 34.05, std 12.19,
+stored in `mappings.json` as `age_mean` / `age_std`). The scaler is fitted on all users, which
+are all training users, since users are not split. It replaced a 7-bucket age one-hot; over
+seeds 0/1/2 validation Recall@200 is 0.7983 ± 0.0057 with the scaled age against
+0.8001 ± 0.0044 with the buckets, a tie. The hyperparameter search above was run with the buckets.
 
 ## Tests
 
