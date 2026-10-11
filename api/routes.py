@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 def get_service(request: Request) -> RecommendationService:
-    return request.app.state.service  # created once in the lifespan (api/main.py)
+    return request.app.state.service
 
 
 Service = Annotated[RecommendationService, Depends(get_service)]
@@ -35,8 +35,6 @@ def recommendations(
     user_id: Annotated[int, Path(ge=1)],
     k: Annotated[int, Query(ge=1, le=100)] = 10,
 ) -> RecommendationResponse:
-    # The upper bound is only known at runtime (largest user ID in Postgres), so it cannot be
-    # declared in Path(). Checked here so an out-of-range ID never reaches a backend.
     if user_id > service.max_user_id:
         raise HTTPException(status_code=422, detail=f"user_id must be between 1 and {service.max_user_id}")
     try:

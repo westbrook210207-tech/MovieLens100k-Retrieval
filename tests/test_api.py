@@ -17,12 +17,12 @@ class FakeRepository:
 
     def __init__(self) -> None:
         self.healthy = True
-        self.user_vectors = {1: [1.0, 0.0], 2: [0.0, 1.0], 3: [0.6, 0.8]}  # indexed users
-        self.seen = {1: [1, 2]}  # user 1 has already rated items 1 and 2
+        self.user_vectors = {1: [1.0, 0.0], 2: [0.0, 1.0], 3: [0.6, 0.8]}
+        self.seen = {1: [1, 2]}
         self.index = {"items": (2, "run-a"), "users": (2, "run-a")}
 
     def max_user_id(self) -> int:
-        return 5  # users 4 and 5 are in range but have no vector
+        return 5
 
     def ping(self) -> None:
         if not self.healthy:
@@ -53,7 +53,7 @@ def repository():
 @pytest.fixture
 def client(repository):
     app.dependency_overrides[get_service] = lambda: RecommendationService(repository, model_run_id="run-a")
-    yield TestClient(app)  # not used as a context manager, so the real lifespan does not run
+    yield TestClient(app)
     app.dependency_overrides.clear()
 
 
@@ -73,7 +73,7 @@ def test_recommendations_shape_and_seen_items_excluded(client):
     assert response.status_code == 200
     body = response.json()
     assert body["user_id"] == 1
-    assert [item["item_id"] for item in body["items"]] == [3, 4]  # 1 and 2 were already rated
+    assert [item["item_id"] for item in body["items"]] == [3, 4]
     assert set(body["items"][0]) == {"item_id", "title", "release_year", "genres", "score"}
 
 
@@ -95,7 +95,7 @@ def test_unknown_user_is_404(client):
 
 @pytest.mark.parametrize("url", ["/users/1/recommendations?k=0", "/users/1/recommendations?k=101",
                                  "/users/0/recommendations", "/users/abc/recommendations",
-                                 "/users/6/recommendations",  # one above the largest user ID
+                                 "/users/6/recommendations",
                                  f"/users/{2**31}/recommendations", f"/users/{10**30}/recommendations"])
 def test_invalid_input_is_422(client, url):
     assert client.get(url).status_code == 422
@@ -119,7 +119,7 @@ def test_missing_metadata_is_logged(client, repository, caplog):
     repository.items_metadata = lambda item_ids: {i: ITEMS[i] for i in item_ids if i != 3}
     with caplog.at_level("WARNING", logger="api"):
         items = client.get("/users/1/recommendations", params={"k": 2}).json()["items"]
-    assert [item["item_id"] for item in items] == [4]  # item 3 has no Postgres row
+    assert [item["item_id"] for item in items] == [4]
     assert "not in Postgres" in caplog.text
 
 
@@ -128,9 +128,9 @@ def test_check_index_accepts_consistent_index_and_returns_run_id(repository):
 
 
 @pytest.mark.parametrize("users_info", [
-    None,            # user vectors never indexed
-    (2, "run-b"),    # user and item vectors from different model runs
-    (4, "run-a"),    # different vector size
+    None,
+    (2, "run-b"),
+    (4, "run-a"),
 ])
 def test_startup_check_rejects_missing_or_inconsistent_index(repository, users_info):
     repository.index["users"] = users_info
@@ -139,7 +139,6 @@ def test_startup_check_rejects_missing_or_inconsistent_index(repository, users_i
 
 
 def test_api_does_not_import_torch_or_training():
-    # Run in a clean interpreter: other test modules may import torch themselves.
     import subprocess
     code = "import sys, api.main; sys.exit(any(m in sys.modules for m in ('torch', 'training')))"
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0

@@ -1,19 +1,13 @@
-# Local development stack. Values come from .env (see .env.example).
-# The API and the training scripts run on the host and reach these services through
-# the published ports. Ports are bound to 127.0.0.1 only: Qdrant and MLflow have no
-# authentication, so they must not be reachable from the rest of the network.
 services:
   postgres:
     image: postgres:17
     environment:
-      # Container-initialisation variables, fed from the same PG_* values the app reads.
       POSTGRES_USER: ${PG_USER}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
       POSTGRES_DB: ${PG_DB}
     ports:
       - "127.0.0.1:${PG_PORT:-5432}:5432"
     volumes:
-      # Tables are created by `python -m training.index` (db/schema.sql), not at container start.
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DB}"]
@@ -23,8 +17,6 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.19.1
     environment:
-      # Two collections of ~1-2k vectors: one thread each is plenty and keeps memory
-      # near 85 MB instead of ~390 MB.
       QDRANT__SERVICE__MAX_WORKERS: "1"
       QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS: "1"
       QDRANT__STORAGE__PERFORMANCE__MAX_OPTIMIZATION_THREADS: "1"
@@ -37,16 +29,13 @@ services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.17.0
     environment:
-      # The background job runner (GenAI scoring jobs) is not used here and costs ~1 GB.
       MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
-    # --workers 1: the default of 4 server processes uses ~2.2 GB; one uses ~370 MB
-    # and is enough for a single person logging runs.
     command: >
       mlflow server --host 0.0.0.0 --port 5000 --workers 1
       --backend-store-uri sqlite:////mlflow/mlflow.db
       --artifacts-destination /mlflow/artifacts
     ports:
-      - "127.0.0.1:5001:5000"  # 5000 on macOS is taken by AirPlay Receiver
+      - "127.0.0.1:5001:5000"
     volumes:
       - mlflow_data:/mlflow
 

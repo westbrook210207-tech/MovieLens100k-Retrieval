@@ -8,7 +8,7 @@ class RecommendedItem(BaseModel):
     title: str
     release_year: int | None
     genres: list[str]
-    score: float  # cosine similarity between the user vector and the item vector
+    score: float
 
 
 class RecommendationResponse(BaseModel):
@@ -18,4 +18,4 @@ class RecommendationResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
-    model_run_id: str | None  # MLflow run of the model whose vectors are being served
+    model_run_id: str | None

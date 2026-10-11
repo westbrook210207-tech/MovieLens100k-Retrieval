@@ -1,16 +1,13 @@
-# API runtime (no PyTorch: the API only reads precomputed vectors)
 fastapi==0.142.2
 uvicorn==0.52.4
 pydantic-settings==2.15.0
 psycopg[binary,pool]==3.3.6
 qdrant-client==1.19.1
 
-# Offline training and indexing
 torch==2.14.1
 numpy==2.5.2
 pandas==3.0.5
 mlflow==3.17.0
 
-# Tests
 pytest==9.1.1
-httpx==0.28.1  # required by fastapi.testclient
+httpx==0.28.1

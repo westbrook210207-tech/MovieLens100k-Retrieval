@@ -9,6 +9,17 @@ Protocol
 - Ties are ranked pessimistically (the target is placed after equal-scored items).
 """
 
+# evaluate.py — measure ranking quality
+#
+# - Job: answer "when the model ranks all films for a user, how high is the held-out film?"
+# - Metrics: Recall, Precision and NDCG
+# - Rule: films the user already rated in earlier parts of the split are removed from the
+#   ranking first.
+# - Used two ways: `train.py` calls its functions every epoch for validation, and you run it
+#   yourself afterwards for the final validation or test score.
+# - Baseline: it also scores "recommend the most popular films to everyone", so you can see
+#   how much the model adds.
+
 import argparse
 import json
 import math
@@ -21,19 +32,18 @@ from torch import Tensor
 from config import get_settings
 from training.models.two_tower import TwoTower, load_model
 
-KS = (10, 20, 200)  # 200: candidate-set size if this retrieval feeds a ranker
+KS = (10, 20, 200)
 
 
 def rank_metrics(scores: Tensor, target: Tensor, ks: tuple[int, ...] = KS) -> dict[str, float]:
     """scores: (U, n_items) with excluded items set to -inf; target: (U,) held-out item index."""
-    target_score = scores.gather(1, target[:, None])          # (U, 1)
-    rank = (scores >= target_score).sum(dim=1) - 1            # 0 = top of the list
+    target_score = scores.gather(1, target[:, None])
+    rank = (scores >= target_score).sum(dim=1) - 1
     metrics = {}
     for k in ks:
         hit = (rank < k).float()
         metrics[f"recall@{k}"] = hit.mean().item()
         metrics[f"precision@{k}"] = hit.mean().item() / k
-        # One relevant item -> ideal DCG is 1, so NDCG = 1 / log2(rank + 2) when hit.
         metrics[f"ndcg@{k}"] = (hit / torch.log2(rank.float() + 2)).mean().item()
     return metrics
 
@@ -42,8 +52,6 @@ def evaluate_scores(scores: Tensor, held_out: pd.DataFrame, seen: pd.DataFrame,
                     ks: tuple[int, ...] = KS) -> dict[str, float]:
     """scores: (n_users, n_items). `held_out` has one row per evaluated user; `seen`
     lists interactions to exclude. Both use zero-based user_idx / item_idx."""
-    # NaN compares False with everything, which would rank every target first and report
-    # perfect metrics for a model that has diverged.
     if not torch.isfinite(scores).all():
         raise ValueError("Scores contain NaN or infinity: the model has diverged (try a lower --lr).")
     scores = scores.clone()
@@ -56,7 +64,7 @@ def evaluate_scores(scores: Tensor, held_out: pd.DataFrame, seen: pd.DataFrame,
 def model_scores(model: TwoTower) -> Tensor:
     """Cosine score of every user against every item: (n_users, n_items)."""
     model.eval()
-    device = model.user_categorical.device  # index tensors must sit on the model's device
+    device = model.user_categorical.device
     users = model.encode_users(torch.arange(len(model.user_categorical), device=device))
     items = model.encode_items(torch.arange(len(model.item_categorical), device=device))
     return users @ items.T
@@ -80,7 +88,6 @@ def main() -> None:
     data = settings.prepared_data_dir
     current_split = json.loads((data / "mappings.json").read_text())["split_hash"]
     if current_split != meta["split_hash"]:
-        # Otherwise the held-out items of this split may be items the model trained on.
         raise SystemExit(
             f"The model was trained on split {meta['split_hash']} but {data} now holds split "
             f"{current_split}. Retrain on the current data, or restore the split the model used."
@@ -98,7 +105,6 @@ def main() -> None:
     print(f"split={args.split} users={len(held_out)} (precision@K is at most 1/K: one held-out item per user)")
     print(pd.DataFrame(results).T.round(4).to_string())
 
-    # Attach the numbers to the training run that produced this artifact.
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     with mlflow.start_run(run_id=meta["run_id"]):
         for name, metrics in results.items():

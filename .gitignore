@@ -1,18 +1,14 @@
-# Secrets / local settings
 .env
 .env.*
 !.env.example
 
-# Raw dataset (download from https://grouplens.org/datasets/movielens/100k/)
 ml-100k/
 
-# Generated data, model weights, experiment tracking
 training/data/
 training/artifacts/
 mlruns/
 mlartifacts/
 
-# Python / OS
 .venv/
 __pycache__/
 .pytest_cache/

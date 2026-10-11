@@ -59,8 +59,7 @@ def _index(qdrant: QdrantClient, run_id: str, item_vectors: list[list[float]]) -
 def repository():
     schema = f"test_{uuid.uuid4().hex[:12]}"
     with psycopg.connect(CONNINFO, autocommit=True) as admin:
-        admin.execute(f'CREATE SCHEMA "{schema}"')  # generated name, not user input
-    # Every connection of this pool sees only the throwaway schema.
+        admin.execute(f'CREATE SCHEMA "{schema}"')
     scoped = make_conninfo(CONNINFO, options=f"-c search_path={schema}")
     pool = ConnectionPool(scoped, min_size=1, max_size=2, open=True)
     qdrant = QdrantClient(":memory:")
@@ -110,18 +109,18 @@ def test_search_orders_by_similarity_and_excludes_ids(repository):
 
 def test_reindex_switches_both_aliases_and_removes_old_collections(repository):
     _index(repository.qdrant, "run-b", [[0.0, 1.0], [0.9, 0.1], [1.0, 0.0]])
-    assert check_index(repository) == "run-b"  # users and items moved together
+    assert check_index(repository) == "run-b"
     assert [item_id for item_id, _ in repository.search_items([1.0, 0.0], [], k=1)] == [3]
-    assert len(repository.qdrant.get_collections().collections) == 2  # old pair deleted
+    assert len(repository.qdrant.get_collections().collections) == 2
 
 
 def test_reload_replaces_rows_and_a_failed_reload_changes_nothing(repository):
     ratings, users, items = _frames()
     with repository.pool.connection() as conn:
-        load_postgres(conn, ratings.iloc[:1], users, items, GENRES)  # rebuild with fewer rows
+        load_postgres(conn, ratings.iloc[:1], users, items, GENRES)
     assert repository.seen_item_ids(1) == [1]
 
-    bad = ratings.assign(rating=[5, 9, 4])  # 9 violates the CHECK constraint
+    bad = ratings.assign(rating=[5, 9, 4])
     with repository.pool.connection() as conn, pytest.raises(psycopg.errors.CheckViolation):
         load_postgres(conn, bad, users, items, GENRES)
-    assert repository.seen_item_ids(1) == [1]  # rolled back: previous data intact
+    assert repository.seen_item_ids(1) == [1]

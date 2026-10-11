@@ -16,6 +16,17 @@ the result, so the dot product of a user and an item vector is a cosine similari
 All indices here are zero-based model indices (`user_idx`, `item_idx`), never raw MovieLens IDs.
 """
 
+# models/two_tower.py — the model and the loss
+#
+# - Job: define what the model is. Nothing is trained in this file.
+# - `Tower`: one side of the model. It looks up an ID embedding, joins it with the feature
+#   columns, passes it through the MLP, and scales the result to length 1.
+# - `TwoTower`: two towers, one for users and one for films, both producing 64-number
+#   vectors in the same space. The score of a user and a film is the cosine of their vectors.
+# - `info_nce`: the loss. Given a user, one liked film and a list of negatives, it rewards
+#   the model for scoring the liked film highest.
+# - `save_model` / `load_model`: write and read `model.pt` and `meta.json`.
+
 import json
 import math
 from pathlib import Path
@@ -40,43 +51,25 @@ class Tower(nn.Module):
         num_hidden_layers: depth; 0 leaves a single linear projection of the inputs.
         """
         super().__init__()
-        # Column 0 is the ID and gets the full embedding size; side features get a small one:
-        # a year bucket has ~9 values and does not need 64 numbers to describe it.
         sizes = [embedding_dim] + [feature_dim] * (len(cardinalities) - 1)
-        # nn.Embedding(n, d) is a trainable lookup table with n rows of d numbers.
-        # nn.ModuleList registers each table so its weights are trained and saved.
         self.embeddings = nn.ModuleList(nn.Embedding(n, d) for n, d in zip(cardinalities, sizes))
         layers: list[nn.Module] = []
-        width = sum(sizes) + dense_dim  # input width: all embeddings + the raw 0/1 columns
+        width = sum(sizes) + dense_dim
         for _ in range(num_hidden_layers):
             layers += [
                 nn.Linear(width, hidden_dim),
-                # ReLU in the hidden layers: cheap, and at 1-2 layers there is nothing
-                # for a smoother activation (GELU/SiLU) to improve.
                 nn.ReLU(),
-                # Dropout randomly zeroes hidden units during training only (off in eval mode),
-                # which stops the model from leaning entirely on the memorised ID embedding.
                 nn.Dropout(dropout),
             ]
-            width = hidden_dim  # the next layer reads this layer's output
-        # No activation after the last layer, on purpose: a ReLU here would make every
-        # coordinate >= 0, so no two vectors could have a cosine below 0 and the loss
-        # could not push a negative item further away than "orthogonal".
+            width = hidden_dim
         layers.append(nn.Linear(width, embedding_dim))
-        # nn.Sequential(*layers) chains them; the * unpacks the list into separate arguments.
         self.mlp = nn.Sequential(*layers)
 
     def forward(self, categorical: Tensor, dense: Tensor | None = None) -> Tensor:
-        # categorical: (..., n_categorical) long; dense: (..., dense_dim) float.
-        # "..." is any leading shape: (B,) for a batch of users, (B, 1 + K) for item lists.
-        # categorical[..., i] picks column i; the lookup adds a trailing axis of that table's size.
         parts = [emb(categorical[..., i]) for i, emb in enumerate(self.embeddings)]
         if dense is not None:
             parts.append(dense)
-        hidden = self.mlp(torch.cat(parts, dim=-1))  # (..., embedding_dim)
-        # L2-normalise to unit length: scores become cosines in [-1, 1], which is what
-        # Qdrant's COSINE distance computes, and the model cannot "cheat" the loss by
-        # simply growing the norm of popular items' vectors.
+        hidden = self.mlp(torch.cat(parts, dim=-1))
         return F.normalize(hidden, dim=-1)
 
 
@@ -90,23 +83,20 @@ class TwoTower(nn.Module):
                  embedding_dim: int = 64, feature_dim: int = 8, hidden_dim: int = 128,
                  dropout: float = 0.1, num_hidden_layers: int = 1) -> None:
         super().__init__()
-        # Buffers are saved with the weights but are not trained (no gradient).
-        # Row i of every table belongs to user_idx / item_idx i.
-        self.register_buffer("user_categorical", user_categorical)  # (n_users, 1): idx
-        self.register_buffer("user_dense", user_dense)              # (n_users, 40) float: is_male + age, occupation, zip-region one-hots
-        self.register_buffer("item_categorical", item_categorical)  # (n_items, 2): idx, year bucket
-        self.register_buffer("item_genres", item_genres)            # (n_items, n_genres) multi-hot float
+        self.register_buffer("user_categorical", user_categorical)
+        self.register_buffer("user_dense", user_dense)
+        self.register_buffer("item_categorical", item_categorical)
+        self.register_buffer("item_genres", item_genres)
         self.user_tower = Tower(user_cardinalities, user_dense.shape[1], embedding_dim, feature_dim,
                                 hidden_dim, dropout, num_hidden_layers)
         self.item_tower = Tower(item_cardinalities, item_genres.shape[1], embedding_dim, feature_dim,
                                 hidden_dim, dropout, num_hidden_layers)
 
     def encode_users(self, user_idx: Tensor) -> Tensor:
-        # Indexing a table with a tensor of indices gathers those rows: (...,) -> (..., n_columns).
-        return self.user_tower(self.user_categorical[user_idx], self.user_dense[user_idx])  # (..., D)
+        return self.user_tower(self.user_categorical[user_idx], self.user_dense[user_idx])
 
     def encode_items(self, item_idx: Tensor) -> Tensor:
-        return self.item_tower(self.item_categorical[item_idx], self.item_genres[item_idx])  # (..., D)
+        return self.item_tower(self.item_categorical[item_idx], self.item_genres[item_idx])
 
 
 def info_nce(user_vectors: Tensor, item_vectors: Tensor, temperature: float,
@@ -125,21 +115,14 @@ def info_nce(user_vectors: Tensor, item_vectors: Tensor, temperature: float,
     correction: optional, same shape as the final logits, (B, 1 + K) or (B, 1 + K + B).
         Subtracted from the logits; used for the logQ popularity correction (see train.py).
     """
-    # einsum "bd,bkd->bk": for each row b and list slot k, the dot product over d of the
-    # user vector with that slot's item vector. Unit vectors -> this is the cosine.
-    # Dividing by the temperature sharpens the softmax: cosines only span [-1, 1], which
-    # alone is too flat to separate one positive from many negatives.
-    logits = torch.einsum("bd,bkd->bk", user_vectors, item_vectors) / temperature  # (B, 1 + K)
+    logits = torch.einsum("bd,bkd->bk", user_vectors, item_vectors) / temperature
     if false_negative is not None:
-        # item_vectors[:, 0] are the B positives of the batch, reused as negatives for the
-        # other rows at no extra encoding cost. Entry [b, j] scores user b against row j's positive.
-        in_batch = user_vectors @ item_vectors[:, 0].T / temperature  # (B, B)
-        # -inf -> exp(-inf) = 0: the candidate vanishes from that user's softmax denominator.
-        logits = torch.cat([logits, in_batch.masked_fill(false_negative, -math.inf)], dim=1)  # (B, 1 + K + B)
+        in_batch = user_vectors @ item_vectors[:, 0].T / temperature
+        logits = torch.cat([logits, in_batch.masked_fill(false_negative, -math.inf)], dim=1)
     if correction is not None:
         logits = logits - correction
-    target = torch.zeros(len(logits), dtype=torch.long, device=logits.device)  # positive is class 0
-    return F.cross_entropy(logits, target)  # = mean over the batch of -log softmax(logits)[positive]
+    target = torch.zeros(len(logits), dtype=torch.long, device=logits.device)
+    return F.cross_entropy(logits, target)
 
 
 def save_model(model: TwoTower, meta: dict, artifact_dir: Path) -> None:
@@ -158,8 +141,6 @@ def load_model(artifact_dir: Path) -> tuple[TwoTower, dict]:
         )
     meta = json.loads(meta_path.read_text())
     n_users, n_items = len(meta["user_ids"]), len(meta["item_ids"])
-    # Placeholder buffers of the right shape; load_state_dict fills in the real feature tables
-    # and raises RuntimeError if the weights do not match this configuration.
     model = TwoTower(
         torch.zeros((n_users, len(meta["user_cardinalities"])), dtype=torch.long),
         torch.zeros((n_users, meta["user_dense_dim"])),

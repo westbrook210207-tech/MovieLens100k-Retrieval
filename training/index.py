@@ -11,6 +11,15 @@ Safe to re-run while the API is serving:
   from the same model.
 """
 
+# index.py — hand the result over to serving
+#
+# - Job: the bridge from training to the API. This is the last time the model is used.
+# - Postgres: loads users, films and all 100,000 ratings.
+# - Qdrant: runs the model once to compute a vector for every user and every film, and
+#   stores them.
+# - Why it exists: after this, the API can recommend by looking up vectors, without PyTorch
+#   or the model.
+
 import re
 import time
 
@@ -31,7 +40,6 @@ SCHEMA_PATH = PROJECT_ROOT / "db" / "schema.sql"
 def load_postgres(conn: psycopg.Connection, ratings: pd.DataFrame, users: pd.DataFrame,
                   items: pd.DataFrame, genres: list[str]) -> None:
     """Rebuild the tables from db/schema.sql and load them, all in one transaction."""
-    # .tolist() converts numpy scalars to plain Python values that psycopg can adapt.
     user_rows = users[["user_id", "age", "gender", "occupation", "zip_code"]].to_numpy(dtype=object).tolist()
     item_rows = [
         (int(row.item_id), row.title, None if pd.isna(row.release_year) else int(row.release_year),
@@ -39,17 +47,13 @@ def load_postgres(conn: psycopg.Connection, ratings: pd.DataFrame, users: pd.Dat
         for row, flags in zip(items.itertuples(), items[genres].to_numpy())
     ]
     rating_rows = ratings[["user_id", "item_id", "rating", "timestamp"]].to_numpy().tolist()
-    # conn.transaction() commits on success and rolls everything back (including the
-    # DROP/CREATE: Postgres DDL is transactional) if any statement fails.
     with conn.transaction(), conn.cursor() as cur:
-        cur.execute(SCHEMA_PATH.read_text())  # several statements; allowed because there are no parameters
+        cur.execute(SCHEMA_PATH.read_text())
         cur.executemany(
             "INSERT INTO users (user_id, age, gender, occupation, zip_code) VALUES (%s, %s, %s, %s, %s)",
             user_rows)
         cur.executemany(
             "INSERT INTO items (item_id, title, release_year, genres) VALUES (%s, %s, %s, %s)", item_rows)
-        # All interactions (including the held-out ones): serving must not recommend
-        # anything the user has already rated.
         cur.executemany(
             "INSERT INTO interactions (user_id, item_id, rating, rated_at) "
             "VALUES (%s, %s, %s, to_timestamp(%s))", rating_rows)
@@ -75,12 +79,11 @@ def switch_aliases(client: QdrantClient, new_collections: dict[str, str]) -> Non
         if alias in current:
             operations.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=alias)))
         elif client.collection_exists(alias):
-            client.delete_collection(alias)  # a plain collection from before aliases were used
+            client.delete_collection(alias)
         operations.append(CreateAliasOperation(
             create_alias=CreateAlias(collection_name=collection, alias_name=alias)))
     client.update_collection_aliases(change_aliases_operations=operations)
 
-    # Clean up: collections the aliases used to point at, and leftovers of crashed runs.
     keep = set(new_collections.values())
     for name in [c.name for c in client.get_collections().collections]:
         if name not in keep and any(re.fullmatch(rf"{re.escape(alias)}_\d+", name) for alias in new_collections):
@@ -91,12 +94,11 @@ def switch_aliases(client: QdrantClient, new_collections: dict[str, str]) -> Non
 def index_model(client: QdrantClient, settings: Settings, model: TwoTower, meta: dict,
                 items: pd.DataFrame) -> None:
     """Offline retrieval step: encode every user and item once, so the API needs no model."""
-    # run_id on every point lets the API report which model it is serving.
     run = {"run_id": meta["run_id"]}
-    item_vectors = model.encode_items(torch.arange(len(meta["item_ids"])))  # (n_items, D), row = item_idx
-    user_vectors = model.encode_users(torch.arange(len(meta["user_ids"])))  # (n_users, D), row = user_idx
+    item_vectors = model.encode_items(torch.arange(len(meta["item_ids"])))
+    user_vectors = model.encode_users(torch.arange(len(meta["user_ids"])))
 
-    items = items.set_index("item_id").loc[meta["item_ids"]]  # same order as the vectors
+    items = items.set_index("item_id").loc[meta["item_ids"]]
     item_payloads = [
         {"genres": [g for g, flag in zip(meta["genres"], flags) if flag],
          "release_year": None if pd.isna(year) else int(year), **run}
@@ -133,11 +135,11 @@ def main() -> None:
     ratings, users, items, genres = load_raw(settings.raw_data_dir)
     validate(ratings, users, items)
     users, items, _ = build_features(users, items, genres)
-    check_ids_match_artifact(users, items, meta)  # before any write to Postgres or Qdrant
+    check_ids_match_artifact(users, items, meta)
 
     with psycopg.connect(settings.pg_conninfo) as conn:
         load_postgres(conn, ratings, users, items, genres)
-        counts = [conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]  # fixed table names, not user input
+        counts = [conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
                   for t in ("users", "items", "interactions")]
     client = QdrantClient(url=settings.qdrant_url)
     index_model(client, settings, model, meta, items)

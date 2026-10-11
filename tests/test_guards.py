@@ -48,7 +48,7 @@ def _raw_frames():
 
 def test_validate_rejects_unknown_gender():
     ratings, users, items = _raw_frames()
-    validate(ratings, users, items)  # the clean frames pass
+    validate(ratings, users, items)
     users.loc[0, "gender"] = "X"
     with pytest.raises(ValueError, match="gender"):
         validate(ratings, users, items)
@@ -56,31 +56,31 @@ def test_validate_rejects_unknown_gender():
 
 def test_user_features_are_one_hot_and_zip_maps_to_region():
     _, users, items = _raw_frames()
-    users.loc[len(users)] = [3, 30, "F", "artist", None]  # missing zip
+    users.loc[len(users)] = [3, 30, "F", "artist", None]
     features, _, mappings = build_features(users, items, ["Drama"])
-    assert features["is_male"].tolist() == [1, 0, 0]  # F -> 0, M -> 1
+    assert features["is_male"].tolist() == [1, 0, 0]
     non_us = len(ZIP_REGIONS) - 1
-    assert features["zip_region"].tolist() == [8, non_us, non_us]  # 85711 -> 8; Canadian and missing -> last
+    assert features["zip_region"].tolist() == [8, non_us, non_us]
     for prefix in ("age_bucket_", "occupation_", "zip_region_"):
         columns = [c for c in features.columns if c.startswith(prefix)]
-        assert (features[columns].sum(axis=1) == 1).all(), prefix  # exactly one column set per user
+        assert (features[columns].sum(axis=1) == 1).all(), prefix
     assert mappings["occupations"] == ["artist", "writer"]
 
 
 def test_index_refuses_raw_data_that_differs_from_the_artifact():
     _, users, items = _raw_frames()
     meta = {"run_id": "run-a", "user_ids": [1, 2], "item_ids": [1]}
-    check_ids_match_artifact(users, items, meta)  # same IDs pass
+    check_ids_match_artifact(users, items, meta)
     with pytest.raises(ValueError, match="user IDs"):
-        check_ids_match_artifact(users, items, {**meta, "user_ids": [1, 2, 3]})  # artifact knows a user the raw data lacks
+        check_ids_match_artifact(users, items, {**meta, "user_ids": [1, 2, 3]})
     with pytest.raises(ValueError, match="item IDs"):
-        check_ids_match_artifact(users, items, {**meta, "item_ids": [2]})  # same count, different ID
+        check_ids_match_artifact(users, items, {**meta, "item_ids": [2]})
 
 
 def test_stale_index_warning(tmp_path, monkeypatch, caplog):
     (tmp_path / "meta.json").write_text(json.dumps({"run_id": "newer-run"}))
     monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path))
-    get_settings.cache_clear()  # settings are cached; re-read the environment
+    get_settings.cache_clear()
     try:
         with caplog.at_level("WARNING", logger="api"):
             warn_if_index_is_stale("newer-run")
