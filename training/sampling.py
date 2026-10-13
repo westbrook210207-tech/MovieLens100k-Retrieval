@@ -57,12 +57,24 @@ class NegativeSampler:
         Called once per epoch, so over training each positive is contrasted with many
         different negatives instead of the same K every time.
         """
-        n = len(self.users)
-        negatives = self.rng.integers(0, self.n_items, size=(n, self.num_negatives))
+        n = self.positives.shape[0] # Number of positive ratings
+        negatives = self.rng.integers(0, self.n_items, size=(n, self.num_negatives)) # create a matrix shape (n,20), note that this line only takes random 20 movies per row, it doesn't know which movie is a valid negative for which user
         while True:
-            collisions = self.seen[self.users[:, None], negatives]
-            if not collisions.any():
+            collisions = self.seen[self.users[:, None], negatives]  # Mark the bad random sampling, which are movies that user already rated
+                                                                    # Explain the logic of this marking line
+                                                                    # self.users[:, None] turns self.users from [0,0,0,...,1,1,...] which is a 1D arr (n,) into a 2D (n,1)
+                                                                    # self.seen() check if that pair is in train.csv or not, mark True if yes False if no
+                                                                    # Since self.seen() only check if pair is in train.csv or not, 
+                                                                    # it doesn't cover pairs that exist but not un training (user X might still rated movie Y 
+                                                                    # but because that pair is not in train.csv, 
+                                                                    # it still can be randomly picked as a negative sample among 20)
+            if not collisions.any(): # If nothing is marked, it's clean and good to break out of this checking loop
                 break
-            negatives[collisions] = self.rng.integers(0, self.n_items, size=collisions.sum())
+            negatives[collisions] = self.rng.integers(0, self.n_items, size=collisions.sum())   # If there's any movie that user already rated, replace it with a new random movie
+                                                                                                # Recheck to see if that new random movie is rated by that user or not?
+                                                                                                # If still then loop until all movies among 20 movies is unrated by that user
+                                                                                                # Explain the logic of this replacing line
+                                                                                                # collisions.sum() counts the True cells. True counts as 1, so the collisions.sum() is basically how many rated movies in the bad sampling
+                                                                                                # Randomly take collisions.sum() number of movies again, so if the previous sampling has 2 rated movies, randomly take 2 new movies to replace them
 
-        return torch.from_numpy(self.users), torch.from_numpy(self.positives), torch.from_numpy(negatives)
+        return torch.from_numpy(self.users), torch.from_numpy(self.positives), torch.from_numpy(negatives) # Turn them into tensors

@@ -92,7 +92,7 @@ class TwoTower(nn.Module): # The role of this class is to take in users and item
     def encode_items(self, item_idx: Tensor) -> Tensor: # Same idea for items
         return self.item_tower(item_idx, self.item_dense[item_idx])
 
-
+# InfoNCE loss for listwise
 def info_nce(user_vectors: Tensor, item_vectors: Tensor, temperature: float,
              false_negative: Tensor | None = None, correction: Tensor | None = None) -> Tensor:
     """Listwise InfoNCE: a softmax classification "which item in this list is the positive?".
@@ -118,13 +118,14 @@ def info_nce(user_vectors: Tensor, item_vectors: Tensor, temperature: float,
     target = torch.zeros(len(logits), dtype=torch.long, device=logits.device)
     return F.cross_entropy(logits, target)
 
-
+# Save model after training.py finished training the model
 def save_model(model: TwoTower, meta: dict, artifact_dir: Path) -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), artifact_dir / "model.pt")
     (artifact_dir / "meta.json").write_text(json.dumps(meta))
 
-
+# Load the trained model when evaluate.py need the model to evaluate the validation set 
+# and index.py loads the model to turns all 943 users and all 1,682 films into vectors, and stores those in Qdrant.
 def load_model(artifact_dir: Path) -> tuple[TwoTower, dict]:
     """Rebuild the model from model.pt + meta.json, in eval mode on CPU."""
     weights_path, meta_path = artifact_dir / "model.pt", artifact_dir / "meta.json"
@@ -135,10 +136,28 @@ def load_model(artifact_dir: Path) -> tuple[TwoTower, dict]:
         )
     meta = json.loads(meta_path.read_text())
     n_users, n_items = len(meta["user_ids"]), len(meta["item_ids"])
+    # Build an empty model, the skeleton, with the same shape as the trained one.
+    # The two feature tables are filled with zeros for now. They only need the right size,
+    # for example 943 x 34 for users and 1682 x 20 for films. The layer sizes come from
+    # meta["model_config"], which train.py saved next to the model.
     model = TwoTower(
         torch.zeros((n_users, meta["user_dense_dim"])),
         torch.zeros((n_items, meta["item_dense_dim"])),
         **meta["model_config"],
     )
+    # Fill the skeleton with the trained numbers from model.pt. This covers the weights and
+    # also the two feature tables, so the zeros above are replaced.
+    # Every number in the file is stored under the name of the part it belongs to, and it is
+    # put into the part of the skeleton with the same name. So this only works if the skeleton
+    # has the same names and sizes as the model that was saved.
+    # That is why the model has to be retrained after a change to the model itself, such as a
+    # layer size or a removed part: the old file no longer fits. A change to sampling, the loss
+    # or the training loop does not break loading.
+    #
+    # map_location="cpu" means: put the numbers on the CPU, wherever they were saved from.
+    # Training runs on MPS (see --device in train.py), but train.py calls model.cpu() just
+    # before save_model, so model.pt is written from the CPU. Loading on the CPU means the file
+    # works on any machine. evaluate.py and index.py only run the model once over all users and
+    # films, and the CPU handles that quickly.
     model.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
     return model.eval(), meta
