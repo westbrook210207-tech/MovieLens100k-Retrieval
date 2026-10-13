@@ -124,7 +124,7 @@ def save_model(model: TwoTower, meta: dict, artifact_dir: Path) -> None:
     torch.save(model.state_dict(), artifact_dir / "model.pt")
     (artifact_dir / "meta.json").write_text(json.dumps(meta))
 
-# Load the trained model when evaluate.py need the model to evaluate the validation set 
+# Load the trained model when evaluate.py need the model to evaluate the validation set and store info about the model into mlflow
 # and index.py loads the model to turns all 943 users and all 1,682 films into vectors, and stores those in Qdrant.
 def load_model(artifact_dir: Path) -> tuple[TwoTower, dict]:
     """Rebuild the model from model.pt + meta.json, in eval mode on CPU."""

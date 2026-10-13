@@ -1,4 +1,4 @@
-"""API response contracts. All IDs are raw MovieLens IDs."""
+# Pydantic models
 
 from pydantic import BaseModel
 

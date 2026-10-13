@@ -43,7 +43,10 @@ SELECTION_METRIC = "recall@200"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])    # p is an object from Python's built-in argparse library. 
+                                                                        # Its job is to read the words you type after a command. Right now it knows no options. 
+                                                                        # The description is only the text shown when you type --help.
+    # --... is the word that the terminal look for
     p.add_argument("--embedding-dim", type=int, default=64)
     p.add_argument("--hidden-dims", type=int, nargs="*", default=[256, 256],
                    help="width of each hidden layer per tower, e.g. 256 128; no values = a single linear projection")
@@ -51,7 +54,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="dropout rate after each hidden layer; one value per --hidden-dims value")
     p.add_argument("--num-negatives", type=int, default=20, help="K sampled negatives per positive")
     p.add_argument("--in-batch-negatives", action=argparse.BooleanOptionalAction, default=True,
-                   help="also use the other rows' positives as negatives (masked + logQ-corrected)")
+                   help="also use the other rows' positives as negatives (masked + logQ-corrected)") # This option takes no word after it. 
+                                                                                                    #BooleanOptionalAction registers two words for the same name: typing --in-batch-negatives stores True, 
+                                                                                                    # typing --no-in-batch-negatives stores False. Typing neither gives the default, True.
     p.add_argument("--temperature", type=float, default=0.1)
     p.add_argument("--lr", type=float, default=3e-3)
     p.add_argument("--weight-decay", type=float, default=1e-4)
@@ -61,6 +66,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu",
                    help="torch device to train on, e.g. mps or cpu")
+    
+    # The add_argument lines above list which hyperparameters exist. This line reads their values:
+    # the typed value where you typed one, the default where you did not.
     args = p.parse_args(argv)
     if len(args.hidden_dims) != len(args.dropouts):
         p.error("--hidden-dims and --dropouts need the same number of values (one per hidden layer)")
