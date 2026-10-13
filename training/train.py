@@ -41,7 +41,7 @@ from training.sampling import NegativeSampler
 
 SELECTION_METRIC = "recall@200"
 
-
+# This function basically let us adjust the hyperparameters via terminal without editing the code
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])    # p is an object from Python's built-in argparse library. 
                                                                         # Its job is to read the words you type after a command. Right now it knows no options. 
@@ -87,10 +87,7 @@ def build_model(users: pd.DataFrame, items: pd.DataFrame, mappings: dict, model_
     # Only the film ID is embedded. The release year is one standard-scaled number
     # (see build_features in prepare.py) fed in next to the 0/1 genre flags.
     item_dense = torch.from_numpy(items[genres + ["release_year_scaled"]].to_numpy()).float()  # (n_items, 20)
-    return TwoTower(
-        user_dense, item_dense,
-        **model_config,
-    )
+    return TwoTower(user_dense, item_dense, **model_config) # Plug user_dense and item_dense into TwoTower() in two_tower.py
 
 
 def main() -> None:
