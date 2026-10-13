@@ -10,15 +10,13 @@ ID convention: `user_id` / `item_id` are raw MovieLens IDs (1-based).
 # prepare.py — turn raw data into training data
 #
 # - Job: read the four raw MovieLens files, check them, and write clean files for training.
-# - Validates: no nulls, ratings between 1 and 5, no duplicate ratings, every rating points
-#   to a known user and film.
+# - Validates: no nulls, ratings between 1 and 5, no duplicate ratings, every rating points to a known user and film.
 # - Builds features: standard-scaled age, gender, occupation and zip region for users;
 #   standard-scaled release year and genres for films. It also gives every user and film a zero-based index
 #   (`user_idx`, `item_idx`).
 # - Splits by time, per user: the latest liked film (rating ≥ 4) is test, the one before is
-#   validation, everything earlier is training.
-# - Output: `train.csv`, `val.csv`, `test.csv`, `users.csv`, `items.csv`, `mappings.json`
-#   in `training/data/`.
+#   validation, everything earlier is training, every non-positive after is dropped.
+# - Output: `train.csv`, `val.csv`, `test.csv`, `users.csv`, `items.csv`, `mappings.json` in `training/data/`.
 
 import argparse # read the --positive-threshold flag from the command line
 import hashlib # compute a fingerprint of the output files
@@ -76,13 +74,13 @@ def validate(ratings: pd.DataFrame, users: pd.DataFrame, items: pd.DataFrame) ->
         problems.append("ratings outside 1-5")
     if ratings.duplicated(["user_id", "item_id"]).any(): # Check for duplicate, did a user rate a movie more than once?
         problems.append("duplicate (user_id, item_id) pairs")
-    if users["user_id"].duplicated().any() or items["item_id"].duplicated().any(): # Check duplicate of users df and items df
+    if users["user_id"].duplicated().any() or items["item_id"].duplicated().any(): # Check duplicate of user_id in users df and item_id in items df
         problems.append("duplicate user or item IDs in metadata")
     if not ratings["user_id"].isin(users["user_id"]).all(): # Check if there's any user in rating df but not in users df
         problems.append("ratings reference users missing from u.user")
     if not ratings["item_id"].isin(items["item_id"]).all(): # Check if there's any item in rating df but not in items df
         problems.append("ratings reference items missing from u.item")
-    if users[["age", "gender", "occupation"]].isna().any().any(): # Check if any col in users df is null, the .isnal().any().any() logic is the same as above
+    if users[["age", "gender", "occupation"]].isna().any().any(): # Check if any col in users df contains any null, the .isnal().any().any() logic is the same as above
         problems.append("user features contain nulls")
     if not users["gender"].isin(["M", "F"]).all(): # Check if there's any different value beside M,F in gender col
         problems.append("gender values other than M/F")
@@ -207,7 +205,7 @@ def split(ratings: pd.DataFrame, positive_threshold: int) -> tuple[pd.DataFrame,
     #
     #   - A not-liked row does not count itself. So "validation + test" is at least 2.
     #     Rows B (3) and D (2) pass. Row F (1) fails, correctly, because only the test film
-    #     is ahead of it.
+    #     is ahead of it and the validation film isn't.
     #
     # That is why there are two halves with different numbers. One number alone gets it wrong:
     #
@@ -285,7 +283,7 @@ def split(ratings: pd.DataFrame, positive_threshold: int) -> tuple[pd.DataFrame,
 #
 # Why the extra brackets. The encoder can encode several columns in one go, so it expects
 # "a list of label-lists, one per column". We give one column, so it is a list holding one
-# list. Without the brackets it fails with "Shape mismatch".
+# list. Without the brackets it fails with "Shape mismatch" since the encoder always take in tables.
 #
 #
 # sparse_output=False: GIVE ME A NORMAL TABLE
@@ -303,20 +301,18 @@ def split(ratings: pd.DataFrame, positive_threshold: int) -> tuple[pd.DataFrame,
 #
 # Without it nothing crashes and the model would train the same. But users.csv would
 # contain 0.0 where it could contain 0, so the file gets bigger and its fingerprint (the
-# feature hash) changes, for no gain. A flag is a whole number, so it is stored as one.
+# feature hash) changes, for no gain.
 #
 #
 # column.to_frame(): WRAP THE COLUMN INTO A TABLE
 #
 # Why we need it. The encoder only accepts a table, meaning rows and columns.
 # users["zip_region"] is a single column on its own, which pandas treats as
-# one-dimensional. to_frame() turns it into a table with one column, keeping the name
-# zip_region.
+# one-dimensional. to_frame() turns it into a table with one column, keeping the name zip_region.
 #
 # Without it it fails: "Expected a 2-dimensional container but got Series".
 #
-# That kept name matters too: it is where the zip_region_ prefix in the output names
-# comes from.
+# That kept name matters too: it is where the zip_region_ prefix in the output names comes from.
 #
 #
 # .set_output(transform="pandas"): KEEP THE NAMES AND ROW NUMBERS
@@ -386,51 +382,6 @@ def one_hot(column: pd.Series, categories: list) -> pd.DataFrame:
 # ==========================================================================================
 # NOTES ON build_features(): NEW TABLE OR MODIFIED TABLE? AND WHY NOTHING IS DROPPED
 #
-#
-# DOES IT BUILD A NEW DF OR MODIFY THE ONE PASSED IN?
-#
-# It builds new ones. The tables passed in are never modified.
-#
-# The reason is the first two lines of the function:
-#
-#   users = users.sort_values("user_id").reset_index(drop=True)
-#   items = items.sort_values("item_id").reset_index(drop=True)
-#
-# sort_values and reset_index each return a NEW table and leave the original alone. The
-# result is assigned to the name users, so from this line on, users inside the function
-# refers to the new copy, not to the table the caller passed in.
-#
-# Everything after that works on the copy:
-#
-#   Line                                 | What it does to the copy
-#   -------------------------------------+--------------------------------------------------
-#   users["user_idx"] = ...              | adds a column to the copy in place
-#   users = users.join(one_hot(...))     | join returns yet another new table, and users
-#                                        | now refers to that one
-#   return users, items, mappings        | hands the final tables back
-#
-# So "does it modify?" has two honest answers depending on which table you mean:
-#
-#   - The caller's original tables: no, untouched.
-#   - The function's own copy: yes, columns are added to it step by step.
-#
-# At the call site the caller reuses the same names for the result:
-#
-#   users, items, mappings = build_features(users, items, genres)
-#
-# After this line, users in main refers to the new 41-column table. The raw 5-column table
-# from load_raw still exists in memory for a moment, but no name points to it any more, so
-# Python discards it. That reuse of the name is why it can look as if the table was
-# modified in place.
-#
-#
-# COPY-OR-IN-PLACE AND DROPPING COLUMNS ARE TWO SEPARATE QUESTIONS
-#
-#   - Copy or in-place is about whether the CALLER'S table is affected.
-#   - Dropping columns is about WHICH COLUMNS THE RESULT HAS.
-#
-# One does not decide the other. The new table still contains the original columns.
-#
 # After build_features, the users table has all 5 raw columns plus the new ones, 41 in total:
 #
 #   user_id, age, gender, occupation, zip_code,        <- original, still there
@@ -460,8 +411,9 @@ def one_hot(column: pd.Series, categories: list) -> pd.DataFrame:
 # Those two are removed because nothing in the project uses them.
 #
 # When dropping the originals DOES matter is the other common style, where you pass the
-# WHOLE table to the model. Then a leftover text column like occupation would crash it or
-# be fed in by mistake. This project avoids that by selecting columns by name.
+# WHOLE table to the model (like those previos ipynb projects). 
+# Then a leftover text column like occupation would crash it or
+# be fed in by mistake. This project avoids that by selecting specific columns by name.
 # ==========================================================================================
 def build_features(users: pd.DataFrame, items: pd.DataFrame, genres: list[str]) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Add zero-based indices and bucketed/encoded feature columns."""
@@ -471,9 +423,6 @@ def build_features(users: pd.DataFrame, items: pd.DataFrame, genres: list[str]) 
 
     users["user_idx"] = np.arange(len(users)) # Turn user_id into 0-based index
 
-    # Age as ONE number per user instead of 7 bucket columns: age_scaled = (age - mean) / std,
-    # so the column has mean 0 and standard deviation 1. A raw age (7 to 73) next to 0/1
-    # columns would dominate the first layer; scaling puts it on the same footing.
     #   - fit learns the mean and std from the data; transform applies them.
     #   - The scaler only accepts a table, hence the double brackets users[["age"]];
     #     [:, 0] takes the single output column back out of the 2-D result.
@@ -484,16 +433,14 @@ def build_features(users: pd.DataFrame, items: pd.DataFrame, genres: list[str]) 
     age_scaler = StandardScaler()
     users["age_scaled"] = age_scaler.fit_transform(users[["age"]])[:, 0]
     users["is_male"] = (users["gender"] == "M").astype(int) # map 1 for M and 0 for F
-    users = users.join(one_hot(users["occupation"], occupations)) # Apply one_hot() onto occupation
+    users = users.join(one_hot(users["occupation"], occupations)) # Apply one_hot() onto users["occupation"]. Note the .join adds new table (in this case it's the one_hot occupation) to the right most
     is_us_zip = users["zip_code"].str.fullmatch(r"\d{5}", na=False) # takes in zipcode, see if the zipcode contains 5 numbers (\d for digit and 5 for 5 numbers), if the zipcode is not 5 numbers then it's marked as non-us (for example 9024 which is 4 num or 1254E which has a letter)
     users["zip_region"] = np.where(is_us_zip, users["zip_code"].str[0].where(is_us_zip, "0").astype(int), len(ZIP_REGIONS) - 1) # Take the first number of the is_us_zip and find its corresponding region on ZIP_REGION. The ones that are non-us, marked as 10 which is non-us/uknown in ZIP_REGION
-    users = users.join(one_hot(users["zip_region"], list(range(len(ZIP_REGIONS))))) # Apply one_hot() onto zip regions (extract from zipcode)
+    users = users.join(one_hot(users["zip_region"], list(range(len(ZIP_REGIONS))))) # Apply one_hot() onto users["zip_regions"] (extract from zipcode)
 
     items["item_idx"] = np.arange(len(items)) # Turn item_id into 0-based index
     items["release_year"] = pd.to_numeric(items["release_date"].str[-4:], errors="coerce").astype("Int64") # Extract release_year form release_date
 
-    # Release year as ONE number per film instead of a year bucket, same idea as age_scaled:
-    # release_year_scaled = (year - mean) / std.
     #   - .astype("float64") turns the nullable Int64 column into plain floats, so the missing
     #     year becomes NaN, which the scaler accepts (pd.NA it does not).
     #   - One film (item 267, titled "unknown") has no release date. The scaler ignores NaN
@@ -522,9 +469,9 @@ def build_features(users: pd.DataFrame, items: pd.DataFrame, genres: list[str]) 
         "occupations": occupations,
         "zip_regions": ZIP_REGIONS,
         "age_mean": float(age_scaler.mean_[0]),   # learned by the scaler; age = age_scaled * age_std + age_mean
-        "age_std": float(age_scaler.scale_[0]),
+        "age_std": float(age_scaler.scale_[0]),   # Also learned by the scaler
         "release_year_mean": float(year_scaler.mean_[0]),  # release_year = release_year_scaled * std + mean
-        "release_year_std": float(year_scaler.scale_[0]),
+        "release_year_std": float(year_scaler.scale_[0]),  # Also learned by the scaler
     }
     return users, items, mappings
 

@@ -138,9 +138,9 @@ About 381K parameters; 168K of them are the ID embedding tables.
 The literal numbers are not in the model file because the MLP is built in a loop:
 
 ```python
-width = sum(sizes) + dense_dim           # 98 for users, 91 for items
-for _ in range(num_hidden_layers):       # --num-hidden-layers, default 2
-    layers += [nn.Linear(width, hidden_dim), nn.ReLU(), nn.Dropout(dropout)]   # --hidden-dim, default 256
+width = embedding_dim + dense_dim     # 98 for users, 91 for items
+for hidden_dim, dropout in zip(hidden_dims, dropouts, strict=True):   # --hidden-dims 256 256, --dropouts 0.1 0.1
+    layers += [nn.Linear(width, hidden_dim), nn.ReLU(), nn.Dropout(dropout)]   # one hidden layer per pair
     width = hidden_dim
 layers.append(nn.Linear(width, embedding_dim))                                  # --embedding-dim, default 64
 ```
@@ -398,10 +398,8 @@ feature hash.
 | Setting | Flag | Value |
 |---|---|---|
 | Output / ID embedding size | `--embedding-dim` | 64 |
-| Side-feature embedding size | `--feature-dim` | 8 |
-| Hidden width | `--hidden-dim` | 256 |
-| Hidden layers per tower | `--num-hidden-layers` | 2 |
-| Dropout | `--dropout` | 0.1 |
+| Width of each hidden layer (one value per layer) | `--hidden-dims` | 256 256 |
+| Dropout after each hidden layer (one value per layer) | `--dropouts` | 0.1 0.1 |
 | Uniform negatives per positive | `--num-negatives` | 20 |
 | In-batch negatives | `--in-batch-negatives` / `--no-in-batch-negatives` | on |
 | Share of explicit negatives | `--hard-negative-ratio` | 0 |

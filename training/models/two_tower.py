@@ -29,6 +29,7 @@ All indices here are zero-based model indices (`user_idx`, `item_idx`), never ra
 
 import json
 import math
+from collections.abc import Sequence
 from pathlib import Path
 
 import torch
@@ -39,64 +40,57 @@ from torch import Tensor, nn
 class Tower(nn.Module):
     """One side of the model (the user tower and the item tower are two instances)."""
 
-    def __init__(self, cardinalities: list[int], dense_dim: int, embedding_dim: int,
-                 feature_dim: int, hidden_dim: int, dropout: float,
-                 num_hidden_layers: int = 1) -> None:
+    def __init__(self, n_ids: int, dense_dim: int, embedding_dim: int,
+                 hidden_dims: Sequence[int], dropouts: Sequence[float]) -> None:
         """
-        cardinalities: vocabulary size of each categorical column; column 0 is the ID.
+        n_ids:         how many different values the ID column can take:
+                       943 for user_id, 1682 for item_id.
         dense_dim:     number of plain 0/1 feature columns fed in without an embedding.
         embedding_dim: size of the ID embedding AND of the tower's output vector (D).
-        feature_dim:   size of the embedding of every other categorical column.
-        hidden_dim:    width of every hidden layer.
-        num_hidden_layers: depth; 0 leaves a single linear projection of the inputs.
+        hidden_dims:   width of each hidden layer, in order. Its length is the depth; an empty
+                       list leaves a single linear projection of the inputs.
+        dropouts:      dropout rate after each hidden layer, one value per entry of hidden_dims.
         """
         super().__init__()
-        sizes = [embedding_dim] + [feature_dim] * (len(cardinalities) - 1)
-        self.embeddings = nn.ModuleList(nn.Embedding(n, d) for n, d in zip(cardinalities, sizes))
-        layers: list[nn.Module] = []
-        width = sum(sizes) + dense_dim
-        for _ in range(num_hidden_layers):
+        self.embedding = nn.Embedding(n_ids, embedding_dim) # ID is embedded into a 64 dims embedding, each user_id and item_id is embedded into 64 dims
+        layers: list[nn.Module] = [] # We use list here so later we can make use of for loop, instead of typing nn.Linear -> nn.ReLU -> nn.Dropout for each layer
+        width = embedding_dim + dense_dim # the input dim is ID dim + feature dim. Such as 64(ID) + 34(user's features) for user, 64(ID) + 20(item's features) for item 
+        # strict: a missing or extra dropout value raises instead of silently dropping a layer.
+        for hidden_dim, dropout in zip(hidden_dims, dropouts, strict=True): # each (hidden_dims,dropouts) pair is dims (aka units) and dropout rate for each layer, corresponding to the idx inside the list. For example hidden_dims[0] and dropout[0] is first layer's dims and dropout rate
+            # Since every layer has the same pattern nn.Linear -> nn.ReLU -> nn.Dropout
             layers += [
                 nn.Linear(width, hidden_dim),
                 nn.ReLU(),
                 nn.Dropout(dropout),
             ]
             width = hidden_dim
-        layers.append(nn.Linear(width, embedding_dim))
-        self.mlp = nn.Sequential(*layers)
+        layers.append(nn.Linear(width, embedding_dim)) # The output layer is linear activation function just like normally, so the output can later be used correctly in loss
+        self.mlp = nn.Sequential(*layers) # Unpack the list into mlp layers
 
-    def forward(self, categorical: Tensor, dense: Tensor | None = None) -> Tensor:
-        parts = [emb(categorical[..., i]) for i, emb in enumerate(self.embeddings)]
-        if dense is not None:
-            parts.append(dense)
-        hidden = self.mlp(torch.cat(parts, dim=-1))
-        return F.normalize(hidden, dim=-1)
+    def forward(self, idx: Tensor, dense: Tensor) -> Tensor:
+        hidden = self.mlp(torch.cat([self.embedding(idx), dense], dim=-1)) # append 34(user) or 20(item) features dims into 64 embedding dims 
+        return F.normalize(hidden, dim=-1) # Normalize embedding length = 1 so later dot product is cosine similarity
 
 
-class TwoTower(nn.Module):
+class TwoTower(nn.Module): # The role of this class is to take in users and items, turn them into embeddings using the skeleton above
     """Feature tables are stored as buffers, so encoding only needs zero-based indices
     and the saved state dict carries exactly the features the model was trained with."""
 
-    def __init__(self, user_categorical: Tensor, user_dense: Tensor, item_categorical: Tensor,
-                 item_dense: Tensor,
-                 user_cardinalities: list[int], item_cardinalities: list[int],
-                 embedding_dim: int = 64, feature_dim: int = 8, hidden_dim: int = 128,
-                 dropout: float = 0.1, num_hidden_layers: int = 1) -> None:
+    def __init__(self, user_dense: Tensor, item_dense: Tensor, embedding_dim: int = 64, 
+                 hidden_dims: Sequence[int] = (128,), dropouts: Sequence[float] = (0.1,)) -> None:
         super().__init__()
-        self.register_buffer("user_categorical", user_categorical)
-        self.register_buffer("user_dense", user_dense)
-        self.register_buffer("item_categorical", item_categorical)
-        self.register_buffer("item_dense", item_dense)  # (n_items, n_genres + 1): genre flags + scaled release year
-        self.user_tower = Tower(user_cardinalities, user_dense.shape[1], embedding_dim, feature_dim,
-                                hidden_dim, dropout, num_hidden_layers)
-        self.item_tower = Tower(item_cardinalities, item_dense.shape[1], embedding_dim, feature_dim,
-                                hidden_dim, dropout, num_hidden_layers)
+        self.register_buffer("user_dense", user_dense) # This line basically means read self.user_dense as user_denses
+        self.register_buffer("item_dense", item_dense)  
+        self.user_tower = Tower(len(user_dense), user_dense.shape[1], embedding_dim,
+                                hidden_dims, dropouts) # len(user_dense) = 943 and user_dense = 34, create 64-dims, normalized embeddings from those input
+        self.item_tower = Tower(len(item_dense), item_dense.shape[1], embedding_dim,
+                                hidden_dims, dropouts) # len(item_dense) = 1682 and item_dense = 20, create 64-dims, normalized embeddings from those input
 
-    def encode_users(self, user_idx: Tensor) -> Tensor:
-        return self.user_tower(self.user_categorical[user_idx], self.user_dense[user_idx])
+    def encode_users(self, user_idx: Tensor) -> Tensor: # 
+        return self.user_tower(user_idx, self.user_dense[user_idx]) # 
 
-    def encode_items(self, item_idx: Tensor) -> Tensor:
-        return self.item_tower(self.item_categorical[item_idx], self.item_dense[item_idx])
+    def encode_items(self, item_idx: Tensor) -> Tensor: # Same idea for items
+        return self.item_tower(item_idx, self.item_dense[item_idx])
 
 
 def info_nce(user_vectors: Tensor, item_vectors: Tensor, temperature: float,
@@ -142,11 +136,9 @@ def load_model(artifact_dir: Path) -> tuple[TwoTower, dict]:
     meta = json.loads(meta_path.read_text())
     n_users, n_items = len(meta["user_ids"]), len(meta["item_ids"])
     model = TwoTower(
-        torch.zeros((n_users, len(meta["user_cardinalities"])), dtype=torch.long),
         torch.zeros((n_users, meta["user_dense_dim"])),
-        torch.zeros((n_items, len(meta["item_cardinalities"])), dtype=torch.long),
         torch.zeros((n_items, meta["item_dense_dim"])),
-        meta["user_cardinalities"], meta["item_cardinalities"], **meta["model_config"],
+        **meta["model_config"],
     )
     model.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
     return model.eval(), meta

@@ -91,8 +91,8 @@ from Postgres. Only users present at indexing time can be served.
 ## Model artifact (`training/artifacts/two_tower/`)
 
 - `model.pt`: state dict, including the user/item feature tables as buffers.
-- `meta.json`: `run_id`, `split_hash`, `positive_threshold`, `model_config` (incl. `num_hidden_layers`), `sampling_config`,
-  `user_cardinalities`, `user_dense_dim`, `item_cardinalities`, `user_ids`, `item_ids`, `genres`, `val_metrics`.
+- `meta.json`: `run_id`, `split_hash`, `positive_threshold`, `model_config` (incl. `hidden_dims`, `dropouts`), `sampling_config`,
+  `user_dense_dim`, `user_ids`, `item_ids`, `genres`, `val_metrics`.
 
 `mappings.json` (written by `training.prepare`) carries two hashes: `split_hash` changes when
 the train/validation/test rows change, `feature_hash` when a user or item feature changes.
@@ -130,8 +130,10 @@ get two fixes, both from training data only:
 
 ## Tower
 
-Each tower is `inputs → [Linear → ReLU → Dropout] × --num-hidden-layers → Linear → L2-normalise`,
-every hidden layer `--hidden-dim` wide. Default: two hidden layers of 256
+Each tower is `inputs → [Linear → ReLU → Dropout] per hidden layer → Linear → L2-normalise`.
+`--hidden-dims` gives the width of each hidden layer and `--dropouts` the dropout rate after
+each one, one value per layer, so the layers need not be identical (e.g.
+`--hidden-dims 256 128 --dropouts 0.2 0.1`). Default: two hidden layers of 256 with dropout 0.1
 (user 98 → 256 → 256 → 64, item 91 → 256 → 256 → 64).
 
 ## Model selection and hyperparameters
@@ -151,12 +153,12 @@ in force at that stage:
 | `--patience` | 5, 10, 20 | 10 (0.7969) | 5 (0.7948) | 5 |
 | `--temperature` | 0.05, 0.07, 0.1, 0.15, 0.2 | 0.1 = 0.15 (0.7948) | 0.1 (0.7948) | 0.1 |
 | `--batch-size` | 256, 512, 1024, 2048 | 256 (0.8001) | 1024 (0.7948) | **256** |
-| `--dropout` | 0, 0.1, 0.2, 0.3 | 0.3 (0.8015) | 0.1 (0.8001) | 0.1 |
+| `--dropouts` (same rate on every layer) | 0, 0.1, 0.2, 0.3 | 0.3 (0.8015) | 0.1 (0.8001) | 0.1 |
 | `--weight-decay` | 0, 0.0001, 0.001, 0.01 | 0.01 (0.8043) | 0.0001 (0.8001) | 0.0001 |
 | `--embedding-dim` | 32, 64, 128 | 64 (0.8001) | 64 (0.8001) | 64 |
-| `--feature-dim` | 4, 8, 16 | 8 (0.8001) | 8 (0.8001) | 8 |
-| `--hidden-dim` | 128, 256, 512 | 128 (0.8022) | 256 (0.8001) | 256 |
-| `--num-hidden-layers` | 1, 2, 3 | 3 (0.8015) | 2 (0.8001) | 2 |
+| `--feature-dim` (option removed: only the ID is embedded now) | 4, 8, 16 | 8 (0.8001) | 8 (0.8001) | removed |
+| `--hidden-dims` (same width on every layer) | 128, 256, 512 | 128 (0.8022) | 256 (0.8001) | 256 |
+| Number of hidden layers (values given to `--hidden-dims`) | 1, 2, 3 | 3 (0.8015) | 2 (0.8001) | 2 |
 
 Negative sampling in the same search (learning rate 0.003, batch 1024, tower 256 → 256):
 

@@ -64,9 +64,9 @@ def evaluate_scores(scores: Tensor, held_out: pd.DataFrame, seen: pd.DataFrame,
 def model_scores(model: TwoTower) -> Tensor:
     """Cosine score of every user against every item: (n_users, n_items)."""
     model.eval()
-    device = model.user_categorical.device
-    users = model.encode_users(torch.arange(len(model.user_categorical), device=device))
-    items = model.encode_items(torch.arange(len(model.item_categorical), device=device))
+    device = model.user_dense.device
+    users = model.encode_users(torch.arange(len(model.user_dense), device=device))
+    items = model.encode_items(torch.arange(len(model.item_dense), device=device))
     return users @ items.T
 
 
