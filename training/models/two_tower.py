@@ -123,14 +123,20 @@ def info_nce(user_vectors: Tensor, item_vectors: Tensor, temperature: float,
     correction: optional, same shape as the final logits, (B, 1 + K) or (B, 1 + K + B).
         Subtracted from the logits; used for the logQ popularity correction (see train.py).
     """
+    # item_vectors is the list of 21 movies including 1 pos and 20 negs for 256 rows
+    # By that, item_vectors contains 1 pos and 277 negs we need for a row
+    # The first index of item_vectors contains the pos of 256 rows, which is also the 256 in-batch sampling
     logits = torch.einsum("bd,bkd->bk", user_vectors, item_vectors) / temperature # torch.einsum("bd,bkd->bk", user_vectors, item_vectors) is the code to 
-                                                                                # take dot product of user embedding and item embedding for score
+                                                                                # take dot product of each user embedding and their 21 item embeddings for score
                                                                                 # then have temperature to scale the score so that normalized embeddings don't create the loss floor
+                                                                                # that's called logit
     if false_negative is not None: # If in-batch is turned on
-        in_batch = user_vectors @ item_vectors[:, 0].T / temperature # Compute logit of each user inside current batch with every movies inside in-batch sampling
-        logits = torch.cat([logits, in_batch.masked_fill(false_negative, -math.inf)], dim=1) # Glue the 21 logits with the 255 logits in-batch, 
+        in_batch = torch.einsum("bd,jd->bj", user_vectors, item_vectors[:, 0]) / temperature # Compute logit of each user inside current batch with every movies inside in-batch sampling, see how we extract in-batch sampling by pull out the pos of all 256 rows
+        logits = torch.cat([logits, in_batch.masked_fill(false_negative, -math.inf)], dim=1) # Glue the 21 logits with the 256 logits in-batch, 
                                                                                             # if the movie is T inside false_negative, its logit is set to -inf bc exp(-inf) = 0
                                                                                             # so T movies (rated movies but in in-batch sampling) have no effect
+                                                                                            # So basically after this line, we have the logit of all pair
+                                                                                            # If that pair is a false_negative pair (rated movies but in in-batch sampling) inside In-batch, it's set to -inf
     if correction is not None:
         logits = logits - correction
     target = torch.zeros(len(logits), dtype=torch.long, device=logits.device)

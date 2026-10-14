@@ -165,10 +165,19 @@ def main() -> None:
                     log_expected_count = expected_count.clamp_min(1e-12).log()  # This is the log in logQ(i)
                                                                                 # clamp_min(1e-12) defines the min so the log is not 0, since ln(0) can't be computed
                                                                                 # log() means ln()
-                    candidates = torch.cat([batch_lists, batch_pos.expand(len(batch), -1)], dim=1)
-                    correction = log_expected_count[candidates]
-                loss = info_nce(model.encode_users(batch_users),
-                                model.encode_items(batch_lists),
+                    candidates = torch.cat([batch_lists, batch_pos.expand(len(batch), -1)], dim=1) # Film IDs of all 277 logit cols of each row: the 21 of batch_lists (1st einsum) + the 256 batch_pos (2nd einsum)
+                                                                                                    # batch_pos.expand(256, -1) repeats the 256 in-batch films for every row, giving (256, 256). -1 means keep that size
+                                                                                                    # dim=1 glues them side by side, giving (256, 277), same order as the logits in info_nce
+                    correction = log_expected_count[candidates] # Looks up logQ(i) of the film in each of the 277 cols, giving (256, 277). info_nce does logits - correction
+
+                # Loss pass in all user ID and movie ID in 1 batch of training into encoders, compute embeddings from those IDs
+                # Have those embeddings, temp, T/F false_negative grid and correction (logQ list for corresponding movie) plugged
+                # into info_nce()
+                loss = info_nce(model.encode_users(batch_users), # So batch_user is the user in (user,pos,{negs})
+                                model.encode_items(batch_lists), # Batch_list is the (pos,{20 negs}) in (user,pos,{negs}), 
+                                                                # note that we can find 256 in-batch negatives from this batch_list too since 256 
+                                                                # rows has 256 pos which are the 256 in-batch
+                                                                # So basically all 277 cols (1 pos + 20 negs + 256 in-batch) come from batch_list
                                 args.temperature, false_negative, correction)
                 optimizer.zero_grad()
                 loss.backward()
@@ -184,13 +193,13 @@ def main() -> None:
                   f"val_ndcg@10 {metrics['ndcg@10']:.4f} "
                   f"val_recall@10 {metrics['recall@10']:.4f}")
 
-            if metrics[SELECTION_METRIC] > best_score:
+            if metrics[SELECTION_METRIC] > best_score: # Select the best model based on Recall@200
                 best_score, best_metrics, stale = metrics[SELECTION_METRIC], metrics, 0
                 best_state = copy.deepcopy(model.state_dict())
             else:
                 stale += 1
-                if stale >= args.patience:
-                    break
+                if stale >= args.patience: # Patience = 5 (default)
+                    break # Early stoppage
 
         model.load_state_dict(best_state)
         model.cpu()
