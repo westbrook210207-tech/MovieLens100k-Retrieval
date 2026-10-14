@@ -50,9 +50,8 @@ def test_release_year_is_standard_scaled_and_a_missing_year_gets_the_mean():
     _, users, _ = _raw_frames()
     items = pd.DataFrame({"item_id": [1, 2, 3], "title": ["A", "B", "C"],
                           "release_date": ["01-Jan-1990", None, "01-Jan-2000"], "Drama": [1, 0, 1]})
-    _, features, mappings = build_features(users, items, ["Drama"])
+    _, features, _ = build_features(users, items, ["Drama"])
     assert features["release_year_scaled"].tolist() == pytest.approx([-1, 0, 1])  # mean 1995, std 5
-    assert (mappings["release_year_mean"], mappings["release_year_std"]) == pytest.approx((1995, 5))
     assert features["release_year"].isna().tolist() == [False, True, False]  # raw year is kept as it was
     assert "year_bucket" not in features.columns
 
@@ -68,7 +67,7 @@ def test_validate_rejects_unknown_gender():
 def test_user_features_are_one_hot_and_zip_maps_to_region():
     _, users, items = _raw_frames()
     users.loc[len(users)] = [3, 30, "F", "artist", None]
-    features, _, mappings = build_features(users, items, ["Drama"])
+    features, _, _ = build_features(users, items, ["Drama"])
     assert features["is_male"].tolist() == [1, 0, 0]
     non_us = len(ZIP_REGIONS) - 1
     assert features["zip_region"].tolist() == [8, non_us, non_us]
@@ -79,9 +78,9 @@ def test_user_features_are_one_hot_and_zip_maps_to_region():
     assert not [c for c in features.columns if c.startswith("age_bucket")]
     assert features["age_scaled"].mean() == pytest.approx(0) and features["age_scaled"].std(ddof=0) == pytest.approx(1)
     assert features["age_scaled"].argsort().tolist() == features["age"].argsort().tolist()  # order preserved
-    scaled_back = features["age_scaled"] * mappings["age_std"] + mappings["age_mean"]
-    assert scaled_back.tolist() == pytest.approx([24, 53, 30])
-    assert mappings["occupations"] == ["artist", "writer"]
+    ages = features["age"]
+    assert features["age_scaled"].tolist() == pytest.approx(((ages - ages.mean()) / ages.std(ddof=0)).tolist())
+    assert [c for c in features.columns if c.startswith("occupation_")] == ["occupation_artist", "occupation_writer"]
 
 
 def test_index_refuses_raw_data_that_differs_from_the_artifact():

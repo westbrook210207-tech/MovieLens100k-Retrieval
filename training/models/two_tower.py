@@ -111,7 +111,7 @@ def info_nce(user_vectors: Tensor, item_vectors: Tensor, temperature: float,
              false_negative: Tensor | None = None, correction: Tensor | None = None) -> Tensor:
     """Listwise InfoNCE: a softmax classification "which item in this list is the positive?".
 
-        loss = -log( exp(s_pos / t) / sum_j exp(s_j / t) ),   s = cosine(user, item)
+        loss = -log( exp(s_pos / t) / sum_j exp(s_j / t) ),   s = cosine(user, item) since magnitude is normalized
 
     user_vectors: (B, D). item_vectors: (B, 1 + K, D), the positive at position 0 and the
     user's K sampled negatives after it (K may be 0 when in-batch negatives are used).
@@ -123,10 +123,14 @@ def info_nce(user_vectors: Tensor, item_vectors: Tensor, temperature: float,
     correction: optional, same shape as the final logits, (B, 1 + K) or (B, 1 + K + B).
         Subtracted from the logits; used for the logQ popularity correction (see train.py).
     """
-    logits = torch.einsum("bd,bkd->bk", user_vectors, item_vectors) / temperature
-    if false_negative is not None:
-        in_batch = user_vectors @ item_vectors[:, 0].T / temperature
-        logits = torch.cat([logits, in_batch.masked_fill(false_negative, -math.inf)], dim=1)
+    logits = torch.einsum("bd,bkd->bk", user_vectors, item_vectors) / temperature # torch.einsum("bd,bkd->bk", user_vectors, item_vectors) is the code to 
+                                                                                # take dot product of user embedding and item embedding for score
+                                                                                # then have temperature to scale the score so that normalized embeddings don't create the loss floor
+    if false_negative is not None: # If in-batch is turned on
+        in_batch = user_vectors @ item_vectors[:, 0].T / temperature # Compute logit of each user inside current batch with every movies inside in-batch sampling
+        logits = torch.cat([logits, in_batch.masked_fill(false_negative, -math.inf)], dim=1) # Glue the 21 logits with the 255 logits in-batch, 
+                                                                                            # if the movie is T inside false_negative, its logit is set to -inf bc exp(-inf) = 0
+                                                                                            # so T movies (rated movies but in in-batch sampling) have no effect
     if correction is not None:
         logits = logits - correction
     target = torch.zeros(len(logits), dtype=torch.long, device=logits.device)

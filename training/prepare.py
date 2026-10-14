@@ -459,19 +459,12 @@ def build_features(users: pd.DataFrame, items: pd.DataFrame, genres: list[str]) 
 
     # mappings.json is the hand-over note from prepare.py to the later steps.
     # It records the decisions prepare.py made that CANNOT be read from the CSV files, so that train.py, evaluate.py and index.py use the same ones without redoing or guessing them.
-    # Those one-hot cols are inside CSV so mapping doesn't need to have them, 
-    # the scaled age and release year are also inside CSV 
-    # but the mean and std that are used to compute it is not, that's why they're in mapping
+    # Those one-hot cols, the scaled age and the scaled release year are all inside CSV, so mapping doesn't need any of them
     mappings = {
+        # What mappings is for: it basically tells train.py, evaluate.py and index.py which exact data
+        # to take from prepare's files, instead of plugging in everything.
         "user_ids": users["user_id"].tolist(),
         "item_ids": items["item_id"].tolist(),
-        "genres": genres,
-        "occupations": occupations,
-        "zip_regions": ZIP_REGIONS,
-        "age_mean": float(age_scaler.mean_[0]),   # learned by the scaler; age = age_scaled * age_std + age_mean
-        "age_std": float(age_scaler.scale_[0]),   # Also learned by the scaler
-        "release_year_mean": float(year_scaler.mean_[0]),  # release_year = release_year_scaled * std + mean
-        "release_year_std": float(year_scaler.scale_[0]),  # Also learned by the scaler
     }
     return users, items, mappings
 
@@ -720,8 +713,8 @@ def main() -> None:
     # THREE MORE ENTRIES FOR mappings (THE NEXT THREE LINES)
     #
     # mappings["key"] = value adds a new entry to the dictionary (or overwrites it if the key
-    # already exists). It returns nothing. build_features() made 9 entries; after these three
-    # lines there are 12.
+    # already exists). It returns nothing. build_features() made 2 entries; after these three
+    # lines there are 5.
     #
     # They are added here and not in build_features() because only main() knows them: the
     # threshold comes from the command line, and the fingerprints exist only after the files
@@ -758,7 +751,7 @@ def main() -> None:
     #
     #   Piece                  | What it returns
     #   -----------------------+-----------------------------------------------------------
-    #   json.dumps(mappings)   | str: the whole dictionary as JSON text, 14,711 characters,
+    #   json.dumps(mappings)   | str: the whole dictionary as JSON text, 13,715 characters,
     #                          | starting {"user_ids": [1, 2, 3, ...
     #   out / "mappings.json"  | Path to the file
     #   (...).write_text(text) | int: the number of characters written. It is not stored,
