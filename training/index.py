@@ -137,12 +137,12 @@ def index_model(client: QdrantClient, settings: Settings, model: TwoTower, meta:
         item_payloads.append({"genres": film_genres, "release_year": release_year, **run}) # 3 info is stored in each vector payload, which is genre, release_year and run_id (which is the model that produce this embedding)
                                                                                             # Later, we'll user run_id to check if user embedding and item embeddings come from the same model
                                                                                             # If not, raise Error
-    switch_aliases(client, {
-        settings.qdrant_item_collection: write_collection(
+    switch_aliases(client, { # Apply switch_alias() on new collections
+        settings.qdrant_item_collection: write_collection( # Write Item Collection
             client, settings.qdrant_item_collection, meta["item_ids"], item_vectors, item_payloads),
-        settings.qdrant_user_collection: write_collection(
+        settings.qdrant_user_collection: write_collection( # Write User Collection
             client, settings.qdrant_user_collection, meta["user_ids"], user_vectors,
-            [run] * len(meta["user_ids"])),
+            [run] * len(meta["user_ids"])), # The only addtional info of user embeddings to be stored in payload is run_id
     })
 
 
@@ -152,8 +152,8 @@ def check_ids_match_artifact(users: pd.DataFrame, items: pd.DataFrame, meta: dic
     Postgres is loaded from the raw files and Qdrant from the artifact, so a difference
     would leave rows without a vector (or vectors without a row). Both frames are sorted by
     raw ID (build_features), the same order as the artifact's lists."""
-    for name, raw_ids, trained_ids in [("user", users["user_id"].tolist(), meta["user_ids"]),
-                                       ("item", items["item_id"].tolist(), meta["item_ids"])]:
+    for name, raw_ids, trained_ids in [("user", users["user_id"].tolist(), meta["user_ids"]), # user["user_id"] and items["item_id"] is for raw_ids
+                                       ("item", items["item_id"].tolist(), meta["item_ids"])]: # meta["user_ids"] and meta["item_ids"] is for trained_ids
         if raw_ids != trained_ids:
             raise ValueError(
                 f"The raw data has {len(raw_ids)} {name} IDs but the model artifact (run {meta['run_id']}) "
