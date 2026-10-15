@@ -57,7 +57,7 @@ class Repository:
                                                                                     # limit = 1 means 1 point at a time
                                                                                     # with_payload = ["run_id"] because we only need run_id for now, we don't need other info
                                                                                     # points = [Record(id=1, payload={"run_id": "a1b2..."}, vector=None)], _ = 2 (only number 2 bc 2 is the next offset of 1)
-        return size, points[0].payload.get("run_id") if points else None # Returns size and Record(id=1, payload={"run_id": "a1b2..."}, vector=None)
+        return size, points[0].payload.get("run_id") if points else None # Returns size and run_id
                                                                         # If the collection is empty, points = [], and that is why the next line has if points else None
                                                                         # and if points = [] which means run_id = None, app still fails
 

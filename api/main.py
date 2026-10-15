@@ -51,13 +51,15 @@ def check_index(repository: Repository) -> str:
     """
     items = repository.index_info(repository.item_collection)
     users = repository.index_info(repository.user_collection)
-    if items is None or users is None or items != users or items[1] is None:
+    if items is None or items != users or items[1] is None: # item[1] is None check for case where you have size so item != None but you don't have run_id
+                                                            # we only need to check item is None and item[1] is None since item and user return exactly the same thing
+                                                            # So item covers user
         raise RuntimeError(
             f"Qdrant vector index is missing or inconsistent: '{repository.item_collection}' "
             f"(size, run_id)={items}, '{repository.user_collection}' (size, run_id)={users}. "
             "Train a model, then run `python -m training.index`."
         )
-    return items[1]
+    return items[1] # Returns run_id
 
 
 def warn_if_index_is_stale(served_run_id: str) -> None:
