@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
                 f"(database '{settings.pg_db}'). Is `docker compose up -d` running, and do the "
                 "PG_* values in .env match the ones the database was created with?"
             ) from error
-        repository = Repository(pool, qdrant, settings.qdrant_collection, settings.qdrant_user_collection)
+        repository = Repository(pool, qdrant, settings.qdrant_item_collection, settings.qdrant_user_collection)
         try:
             run_id = check_index(repository)
         except RuntimeError:

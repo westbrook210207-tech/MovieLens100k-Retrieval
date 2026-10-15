@@ -41,11 +41,19 @@ def load_postgres(conn: psycopg.Connection, ratings: pd.DataFrame, users: pd.Dat
                   items: pd.DataFrame, genres: list[str]) -> None:
     """Rebuild the tables from db/schema.sql and load them, all in one transaction."""
     user_rows = users[["user_id", "age", "gender", "occupation", "zip_code"]].to_numpy(dtype=object).tolist()
-    item_rows = [
-        (int(row.item_id), row.title, None if pd.isna(row.release_year) else int(row.release_year),
-         [g for g, flag in zip(genres, flags) if flag])
-        for row, flags in zip(items.itertuples(), items[genres].to_numpy())
-    ]
+    item_rows = []
+    for row, flags in zip(items.itertuples(), items[genres].to_numpy()): # itertuples() lets you access column values using dot notation (e.g., row.column_name) rather than bracket indexing.
+        # A film can have several genres; keep the names whose 0/1 flag is set.
+        film_genres = []
+        for genre, flag in zip(genres, flags):
+            if flag:
+                film_genres.append(genre)
+        # One film (item 267, "unknown") has no release year; store NULL for it.
+        if pd.isna(row.release_year):
+            release_year = None
+        else:
+            release_year = int(row.release_year)
+        item_rows.append((int(row.item_id), row.title, release_year, film_genres))
     rating_rows = ratings[["user_id", "item_id", "rating", "timestamp"]].to_numpy().tolist()
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(SCHEMA_PATH.read_text())
@@ -67,7 +75,11 @@ def write_collection(client: QdrantClient, alias: str, ids: list[int], vectors: 
     client.create_collection(collection, vectors_config=VectorParams(size=vectors.shape[1],
                                                                      distance=Distance.COSINE)) # Cosine similarity
     client.upsert(collection, points=[PointStruct(id=point_id, vector=vector, payload=payload)
-                                      for point_id, vector, payload in zip(ids, vectors.tolist(), payloads)])
+                                      for point_id, vector, payload in zip(ids, vectors.tolist(), payloads)]) # Payload lets us store additional info along with vectors. 
+                                                                                                                # For example, we can store "genre" of vectors. 
+                                                                                                                # Then later tell Qdrant to return top_10 "Drama" recommendations for user A
+                                                                                                                # Those recommendatins which are not "Drama" won't be recommended 
+                                                                                                                # even though their score are higher
     return collection
 
 
@@ -80,7 +92,7 @@ def switch_aliases(client: QdrantClient, new_collections: dict[str, str]) -> Non
     operations = [] # To-do list for Qdrant, NOT sent yet
     for alias, collection in new_collections.items(): # alias = "items", collection = "items_1760..." (then same for users)
         if alias in current: # Alias already exists
-            operations.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=alias))) # # Add "unhook alias items from the OLD collection" to the to-do list
+            operations.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=alias))) # Add "unhook alias items from the OLD collection" to the to-do list
         elif client.collection_exists(alias): # No alias, but a REAL collection called "items" exists (old setup)
             client.delete_collection(alias) # Delete it right now, since an alias can't have the same name as a collection
         operations.append(CreateAliasOperation(
@@ -110,14 +122,24 @@ def index_model(client: QdrantClient, settings: Settings, model: TwoTower, meta:
     user_vectors = model.encode_users(torch.arange(len(meta["user_ids"])))
 
     items = items.set_index("item_id").loc[meta["item_ids"]]
-    item_payloads = [
-        {"genres": [g for g, flag in zip(meta["genres"], flags) if flag],
-         "release_year": None if pd.isna(year) else int(year), **run}
-        for flags, year in zip(items[meta["genres"]].to_numpy(), items["release_year"])
-    ]
+    item_payloads = []
+    for flags, year in zip(items[meta["genres"]].to_numpy(), items["release_year"]):
+        # Keep the names of the genres whose 0/1 flag is set.
+        film_genres = []
+        for genre, flag in zip(meta["genres"], flags):
+            if flag:
+                film_genres.append(genre)
+        # Item 267 has no release year; store null for it, as in Postgres.
+        if pd.isna(year):
+            release_year = None
+        else:
+            release_year = int(year)
+        item_payloads.append({"genres": film_genres, "release_year": release_year, **run}) # 3 info is stored in each vector payload, which is genre, release_year and run_id (which is the model that produce this embedding)
+                                                                                            # Later, we'll user run_id to check if user embedding and item embeddings come from the same model
+                                                                                            # If not, raise Error
     switch_aliases(client, {
-        settings.qdrant_collection: write_collection(
-            client, settings.qdrant_collection, meta["item_ids"], item_vectors, item_payloads),
+        settings.qdrant_item_collection: write_collection(
+            client, settings.qdrant_item_collection, meta["item_ids"], item_vectors, item_payloads),
         settings.qdrant_user_collection: write_collection(
             client, settings.qdrant_user_collection, meta["user_ids"], user_vectors,
             [run] * len(meta["user_ids"])),
@@ -154,10 +176,10 @@ def main() -> None:
                   for t in ("users", "items", "interactions")]
     client = QdrantClient(url=settings.qdrant_url)
     index_model(client, settings, model, meta, items)
-    points = client.count(settings.qdrant_collection).count
+    points = client.count(settings.qdrant_item_collection).count
     user_points = client.count(settings.qdrant_user_collection).count
     print(f"postgres users={counts[0]} items={counts[1]} interactions={counts[2]}; "
-          f"qdrant '{settings.qdrant_collection}' points={points} "
+          f"qdrant '{settings.qdrant_item_collection}' points={points} "
           f"'{settings.qdrant_user_collection}' points={user_points} (run {meta['run_id']})")
 
 

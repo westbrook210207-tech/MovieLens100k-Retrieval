@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     pg_password: SecretStr = SecretStr("")
 
     qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "items"
+    qdrant_item_collection: str = "items"
     qdrant_user_collection: str = "users"
 
     mlflow_tracking_uri: str = "http://localhost:5001"
