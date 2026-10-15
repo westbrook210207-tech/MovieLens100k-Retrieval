@@ -65,29 +65,40 @@ def write_collection(client: QdrantClient, alias: str, ids: list[int], vectors: 
     vectors: (len(ids), D), row i belongs to ids[i]. Nothing reads the collection yet."""
     collection = f"{alias}_{time.time_ns()}"
     client.create_collection(collection, vectors_config=VectorParams(size=vectors.shape[1],
-                                                                     distance=Distance.COSINE))
+                                                                     distance=Distance.COSINE)) # Cosine similarity
     client.upsert(collection, points=[PointStruct(id=point_id, vector=vector, payload=payload)
                                       for point_id, vector, payload in zip(ids, vectors.tolist(), payloads)])
     return collection
 
 
+# This function basically let us reuse the aliases "items" and "users": every time index.py reloads the embeddings
+# into Qdrant as new collections, the aliases are switched to the new ones (in 1 request), then the old collections are deleted
+# So the API always asks for "items" and "users" and never needs to change or restart
 def switch_aliases(client: QdrantClient, new_collections: dict[str, str]) -> None:
     """Point each alias at its new collection in ONE request (atomic), then delete the old ones."""
-    current = {a.alias_name: a.collection_name for a in client.get_aliases().aliases}
-    operations = []
-    for alias, collection in new_collections.items():
-        if alias in current:
-            operations.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=alias)))
-        elif client.collection_exists(alias):
-            client.delete_collection(alias)
+    current = {a.alias_name: a.collection_name for a in client.get_aliases().aliases} # This asks Qdrant which aliases exist now and where they point: {"items": "items_1759...", "users": "users_1759..."}
+    operations = [] # To-do list for Qdrant, NOT sent yet
+    for alias, collection in new_collections.items(): # alias = "items", collection = "items_1760..." (then same for users)
+        if alias in current: # Alias already exists
+            operations.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=alias))) # # Add "unhook alias items from the OLD collection" to the to-do list
+        elif client.collection_exists(alias): # No alias, but a REAL collection called "items" exists (old setup)
+            client.delete_collection(alias) # Delete it right now, since an alias can't have the same name as a collection
         operations.append(CreateAliasOperation(
-            create_alias=CreateAlias(collection_name=collection, alias_name=alias)))
-    client.update_collection_aliases(change_aliases_operations=operations)
+            create_alias=CreateAlias(collection_name=collection, alias_name=alias))) # Add "create alias items -> items_1760..." to the to-do list
+    client.update_collection_aliases(change_aliases_operations=operations) # Send the whole to-do list in 1 request, so the API sees old pair or new pair, NEVER a mix
 
-    keep = set(new_collections.values())
-    for name in [c.name for c in client.get_collections().collections]:
-        if name not in keep and any(re.fullmatch(rf"{re.escape(alias)}_\d+", name) for alias in new_collections):
-            client.delete_collection(name)
+    keep = set(new_collections.values()) # The 2 new collections, {"items_1760...", "users_1760..."}
+    for name in [c.name for c in client.get_collections().collections]: # Go through every collection in Qdrant
+        if name not in keep and any(re.fullmatch(rf"{re.escape(alias)}_\d+", name) for alias in new_collections): # Delete name only if BOTH: 1) it's not one of the 2 new collections, 2) it's named items_<digits> or users_<digits>
+                                                                                                                   # any(...) checks name against "items_<digits>" and against "users_<digits>", True if it matches at least one of them
+                                                                                                                   # The pattern is "items_" + only digits, e.g. items_1759... matches, items_backup or my_items_1759 don't
+                                                                                                                   # Only 1) would also delete unrelated collections (test_stuff), only 2) would also delete the NEW ones:
+                                                                                                                   #                        1) not new?   2) items_/users_<digits>?   deleted?
+                                                                                                                   #   items_1760... (new)      no              yes                    no
+                                                                                                                   #   items_1759... (old)      yes             yes                    YES
+                                                                                                                   #   test_stuff               yes             no                     no
+                                                                                                                   # So basically: old items_<time> / users_<time> get deleted, any other collection is left alone
+            client.delete_collection(name) 
 
 
 @torch.no_grad()
