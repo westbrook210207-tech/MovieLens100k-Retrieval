@@ -161,28 +161,10 @@ def load_model(artifact_dir: Path) -> tuple[TwoTower, dict]:
         )
     meta = json.loads(meta_path.read_text())
     n_users, n_items = len(meta["user_ids"]), len(meta["item_ids"])
-    # Build an empty model, the skeleton, with the same shape as the trained one.
-    # The two feature tables are filled with zeros for now. They only need the right size,
-    # for example 943 x 34 for users and 1682 x 20 for films. The layer sizes come from
-    # meta["model_config"], which train.py saved next to the model.
-    model = TwoTower(
-        torch.zeros((n_users, meta["user_dense_dim"])),
-        torch.zeros((n_items, meta["item_dense_dim"])),
-        **meta["model_config"],
+    model = TwoTower( # Build the empty skeleton: zero feature tables (943 x 34, 1682 x 20)
+        torch.zeros((n_users, meta["user_dense_dim"])), # Plug in user_dense skeleton for user_tower
+        torch.zeros((n_items, meta["item_dense_dim"])), # Plug in item_dense skeleton for item_tower
+        **meta["model_config"], # Plug in other config of the model skeleton such as 64 embedding_dims (which is used by both ID embedding and output embeddings), hidden_dims, dropout
     )
-    # Fill the skeleton with the trained numbers from model.pt. This covers the weights and
-    # also the two feature tables, so the zeros above are replaced.
-    # Every number in the file is stored under the name of the part it belongs to, and it is
-    # put into the part of the skeleton with the same name. So this only works if the skeleton
-    # has the same names and sizes as the model that was saved.
-    # That is why the model has to be retrained after a change to the model itself, such as a
-    # layer size or a removed part: the old file no longer fits. A change to sampling, the loss
-    # or the training loop does not break loading.
-    #
-    # map_location="cpu" means: put the numbers on the CPU, wherever they were saved from.
-    # Training runs on MPS (see --device in train.py), but train.py calls model.cpu() just
-    # before save_model, so model.pt is written from the CPU. Loading on the CPU means the file
-    # works on any machine. evaluate.py and index.py only run the model once over all users and
-    # films, and the CPU handles that quickly.
-    model.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
+    model.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True)) # Plug the trained parameters from model.pt into the skeleton, on CPU
     return model.eval(), meta
