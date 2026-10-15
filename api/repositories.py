@@ -81,10 +81,16 @@ class Repository:
 
     def search_items(self, vector: list[float], exclude_ids: list[int], k: int) -> list[tuple[int, float]]:
         """The k highest-scoring items that are not in exclude_ids, as (item_id, score), best first."""
-        query_filter = Filter(must_not=[HasIdCondition(has_id=exclude_ids)]) if exclude_ids else None
-        result = self.qdrant.query_points(self.item_collection, query=vector, query_filter=query_filter,
-                                          limit=k, with_payload=False,
-                                          search_params=SearchParams(exact=True))
+        query_filter = Filter(must_not=[HasIdCondition(has_id=exclude_ids)]) if exclude_ids else None # exclude_ids are only rated movies of user A in this project (all rated movies depsite the rating)
+        result = self.qdrant.query_points(self.item_collection, # Search in item_collection
+                                          query=vector, # the user's 64 floats from user_vector(): "find films closest to THIS"
+                                          query_filter=query_filter, # Apply query_filter above
+                                          limit=k, # top_k
+                                          with_payload=False,
+                                          with_vectors=False,
+                                          search_params=SearchParams(exact=True))  # compare against EVERY film, not an approximate shortcut
+                                                                                    # If exact=False (the default) is HNSW. It walks a graph of neighbours and checks only some films, 
+                                                                                    # so it's faster but may miss a few of the true top-k. 
         return [(point.id, point.score) for point in result.points] # Returns item_id, score in response body
 
     def items_metadata(self, item_ids: list[int]) -> dict[int, dict]:
