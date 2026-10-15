@@ -44,22 +44,28 @@ class Repository:
             conn.execute("SELECT 1")
         for collection in (self.item_collection, self.user_collection):
             if not self.qdrant.collection_exists(collection): # .qdrant.collection_exists() automatically raise if there's a connection failure so we don't have to manually create an if/raise
-                raise RuntimeError(f"Qdrant collection '{collection}' does not exist")
+                raise RuntimeError(f"Qdrant collection '{collection}' does not exist") # So only the missing collections need an if/raise
 
     def index_info(self, collection: str) -> tuple[int, str | None] | None:
         """(vector size, run_id of the model that produced the vectors), or None if the
         collection does not exist. Used once, at startup, by check_index() in main.py."""
         if not self.qdrant.collection_exists(collection):
             return None
-        size = self.qdrant.get_collection(collection).config.params.vectors.size
-        points, _ = self.qdrant.scroll(collection, limit=1, with_payload=["run_id"])
-        return size, points[0].payload.get("run_id") if points else None
+        size = self.qdrant.get_collection(collection).config.params.vectors.size # return the vector size which is 64 by default
+        points, _ = self.qdrant.scroll(collection, limit=1, with_payload=["run_id"]) # scroll returns 1 point and the next point of that point which means it returns a pair (current point, offset)
+                                                                                    # But we don't need the offset in the returned pair, that's why we have store offset in _ and current point in points
+                                                                                    # limit = 1 means 1 point at a time
+                                                                                    # with_payload = ["run_id"] because we only need run_id for now, we don't need other info
+                                                                                    # points = [Record(id=1, payload={"run_id": "a1b2..."}, vector=None)], _ = 2 (only number 2 bc 2 is the next offset of 1)
+        return size, points[0].payload.get("run_id") if points else None # Returns size and Record(id=1, payload={"run_id": "a1b2..."}, vector=None)
+                                                                        # If the collection is empty, points = [], and that is why the next line has if points else None
+                                                                        # and if points = [] which means run_id = None, app still fails
 
     def user_vector(self, user_id: int) -> list[float] | None:
         """The user's precomputed embedding, or None for a user that was never indexed."""
         points = self.qdrant.retrieve(self.user_collection, ids=[user_id], with_vectors=True,
-                                      with_payload=False)
-        return points[0].vector if points else None
+                                      with_payload=False) # with_vectors = True, with_payload = False means just give me vectors, don't give me payload
+        return points[0].vector if points else None # points of user_vector contains only ID and vector (64 values)
 
     def max_user_id(self) -> int:
         """The largest raw user ID in Postgres; 0 when the table is empty."""
@@ -69,8 +75,9 @@ class Repository:
     def seen_item_ids(self, user_id: int) -> list[int]:
         """Raw item IDs of every film this user has rated; [] if there are none."""
         with self.pool.connection() as conn:
-            rows = conn.execute("SELECT item_id FROM interactions WHERE user_id = %s", (user_id,)).fetchall()
-        return [row[0] for row in rows]
+            rows = conn.execute("SELECT item_id FROM interactions WHERE user_id = %s", (user_id,)).fetchall() # take all rated movies ID of user A
+                                                                                                            # This returns a list of tuple [(43,), (67,), (99,),...] which each tuple is a rated movie ID
+        return [row[0] for row in rows] # For each tuple inside that list, take the first element of the tuple. Which is the 43, 67, 99, ... movie IDs
 
     def search_items(self, vector: list[float], exclude_ids: list[int], k: int) -> list[tuple[int, float]]:
         """The k highest-scoring items that are not in exclude_ids, as (item_id, score), best first."""
@@ -78,7 +85,7 @@ class Repository:
         result = self.qdrant.query_points(self.item_collection, query=vector, query_filter=query_filter,
                                           limit=k, with_payload=False,
                                           search_params=SearchParams(exact=True))
-        return [(point.id, point.score) for point in result.points]
+        return [(point.id, point.score) for point in result.points] # Returns item_id, score in response body
 
     def items_metadata(self, item_ids: list[int]) -> dict[int, dict]:
         """Title, release year and genres for the given item IDs, as {item_id: {...}}.
@@ -88,4 +95,4 @@ class Repository:
                 "SELECT item_id, title, release_year, genres FROM items WHERE item_id = ANY(%s)",
                 (item_ids,),
             ).fetchall()
-        return {r[0]: {"title": r[1], "release_year": r[2], "genres": r[3]} for r in rows}
+        return {r[0]: {"title": r[1], "release_year": r[2], "genres": r[3]} for r in rows} # Returns title, release_year and genres in response body
