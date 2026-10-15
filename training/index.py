@@ -164,22 +164,32 @@ def check_ids_match_artifact(users: pd.DataFrame, items: pd.DataFrame, meta: dic
 
 def main() -> None:
     settings = get_settings()
-    model, meta = load_model(settings.artifact_dir)
-    ratings, users, items, genres = load_raw(settings.raw_data_dir)
-    validate(ratings, users, items)
+    model, meta = load_model(settings.artifact_dir) # Load model and its meta
+    ratings, users, items, genres = load_raw(settings.raw_data_dir) # Load raw data
+    validate(ratings, users, items) 
     users, items, _ = build_features(users, items, genres)
-    check_ids_match_artifact(users, items, meta)
+    check_ids_match_artifact(users, items, meta) # Check ids match between raw data and trained data
 
     with psycopg.connect(settings.pg_conninfo) as conn:
         load_postgres(conn, ratings, users, items, genres)
-        counts = [conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
-                  for t in ("users", "items", "interactions")]
+        counts = [] # Row counts of the 3 tables, only for the summary printed at the end of this script
+                    # Nothing checks these numbers, it's a report for us to read, e.g. users=943 items=1682 interactions=100000
+                    
+        for table in ("users", "items", "interactions"):
+            counts.append(conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]) # conn.execute(...) runs the SQL and returns a cursor holding the result rows
+                                                                                      # SELECT count(*) returns 1 row with 1 column, the number of rows in that table
+                                                                                      # .fetchone() takes that 1 row out of the cursor as a tuple, e.g. (943,)
+                                                                                      # [0] takes the first (and only) value of that tuple, so 943 instead of (943,)
+                                                                                      # We need .fetchone() bc conn.execute() hands you the cursor only, if you printed it without .fetchone() you'll get something like <psycopg.Cursor ...>, not 943
     client = QdrantClient(url=settings.qdrant_url)
-    index_model(client, settings, model, meta, items)
-    points = client.count(settings.qdrant_item_collection).count
-    user_points = client.count(settings.qdrant_user_collection).count
+    index_model(client, settings, model, meta, items) # We don't pass in users because we can compute user embeddings using model and meta["user_id"], 
+                                                        #then why do we need to pass item when we can just compute item embeddings the same way as user embeddings?
+                                                        # We explicitly pass in items because we need their additional info for payload beside run_id which can be found in meta["run_id"]
+                                                        
+    item_points = client.count(settings.qdrant_item_collection).count # Count number of item points
+    user_points = client.count(settings.qdrant_user_collection).count # Count number of user points
     print(f"postgres users={counts[0]} items={counts[1]} interactions={counts[2]}; "
-          f"qdrant '{settings.qdrant_item_collection}' points={points} "
+          f"qdrant '{settings.qdrant_item_collection}' points={item_points} "
           f"'{settings.qdrant_user_collection}' points={user_points} (run {meta['run_id']})")
 
 
