@@ -416,7 +416,7 @@ def one_hot(column: pd.Series, categories: list) -> pd.DataFrame:
 # be fed in by mistake. This project avoids that by selecting specific columns by name.
 # ==========================================================================================
 def build_features(users: pd.DataFrame, items: pd.DataFrame, genres: list[str]) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """Add zero-based indices and bucketed/encoded feature columns."""
+    """Add zero-based indices and scaled/bucketed/encoded feature columns."""
     users = users.sort_values("user_id").reset_index(drop=True)
     items = items.sort_values("item_id").reset_index(drop=True)
     occupations = sorted(users["occupation"].unique())
