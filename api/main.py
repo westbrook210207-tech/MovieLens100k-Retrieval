@@ -69,8 +69,8 @@ def warn_if_index_is_stale(served_run_id: str) -> None:
     if not meta_path.exists():
         return
     exported_run_id = json.loads(meta_path.read_text()).get("run_id")
-    if exported_run_id != served_run_id:
-        logger.warning(json.dumps({
+    if exported_run_id != served_run_id: # Check if the model that produces the collections and the model in meta is the same model
+        logger.warning(json.dumps({ # here we only warning, not raise
             "event": "stale_index", "serving_run_id": served_run_id, "exported_run_id": exported_run_id,
             "hint": "run `python -m training.index` to serve the exported model",
         }))
@@ -81,12 +81,12 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
 
     pool = ConnectionPool(settings.pg_conninfo, min_size=1, max_size=5,
-                          timeout=BACKEND_TIMEOUT_SECONDS, open=False)
+                          timeout=BACKEND_TIMEOUT_SECONDS, open=False) # open = False means create pool but don't connect to PG yet
     qdrant = QdrantClient(url=settings.qdrant_url, timeout=BACKEND_TIMEOUT_SECONDS)
     try:
         try:
-            pool.open(wait=True, timeout=BACKEND_TIMEOUT_SECONDS)
-        except PoolTimeout as error:
+            pool.open(wait=True, timeout=BACKEND_TIMEOUT_SECONDS) # Connect pool to PG here
+        except PoolTimeout as error: # Raise if PG connection fails
             raise RuntimeError(
                 f"Cannot connect to Postgres at {settings.pg_host}:{settings.pg_port} "
                 f"(database '{settings.pg_db}'). Is `docker compose up -d` running, and do the "
@@ -95,9 +95,9 @@ async def lifespan(app: FastAPI):
         repository = Repository(pool, qdrant, settings.qdrant_item_collection, settings.qdrant_user_collection)
         try:
             run_id = check_index(repository)
-        except RuntimeError:
+        except RuntimeError: # raise RuntimeError in check_index() only stops check_index(), re-raise is needed to stop lifespan()
             raise
-        except Exception as error:
+        except Exception as error: # Raise if Qdrant connection fails 
             raise RuntimeError(f"Cannot reach Qdrant at {settings.qdrant_url}. "
                                "Is `docker compose up -d` running?") from error
         warn_if_index_is_stale(run_id)
