@@ -61,7 +61,7 @@ def evaluate_scores(scores: Tensor, held_out: pd.DataFrame, seen: pd.DataFrame,
                                                                                 # (-inf is never >= the held-out film's score)
     
     users = torch.from_numpy(held_out["user_idx"].to_numpy()) # Turn all user in held_out from df to np to tensor
-    return rank_metrics(scores[users], torch.from_numpy(held_out["item_idx"].to_numpy()), ks) # Return score of all user in held_out, return held_out tensor, return Ks
+    return rank_metrics(scores[users], torch.from_numpy(held_out["item_idx"].to_numpy()), ks) # Pass score of all user in held_out, held_out tensor, Ks into rank_metrics()
 
 # Eval loop
 @torch.no_grad()
@@ -69,7 +69,7 @@ def model_scores(model: TwoTower) -> Tensor:
     """Cosine score of every user against every item: (n_users, n_items)."""
     model.eval()
     device = model.user_dense.device
-    users = model.encode_users(torch.arange(len(model.user_dense), device=device)) # len(user_dense) is also the 943 ID, torch.arange returns a list with 0 based idx so len() = 943, torch.arange(943) returns [0,1,...,942]
+    users = model.encode_users(torch.arange(len(model.user_dense), device=device)) # len(user_dense) is also the 943 ID, torch.arange returns a tensor starting from 0 so len() = 943, torch.arange(943) returns [0,1,...,942]
     items = model.encode_items(torch.arange(len(model.item_dense), device=device)) # same for item 
     return users @ items.T
 
@@ -88,9 +88,9 @@ def main() -> None:
     args = parser.parse_args()
     settings = get_settings()
 
-    model, meta = load_model(settings.artifact_dir) # Load model and meta from training.py
+    model, meta = load_model(settings.artifact_dir) # Load model and meta from train.py
     data = settings.prepared_data_dir
-    current_split = json.loads((data / "mappings.json").read_text())["split_hash"] # Take "split-hash" in mappings.json
+    current_split = json.loads((data / "mappings.json").read_text())["split_hash"] # Take "split_hash" in mappings.json
     if current_split != meta["split_hash"]: # If the split on disk now differs from the one the model was trained on, it raises error.
         raise SystemExit(
             f"The model was trained on split {meta['split_hash']} but {data} now holds split "
