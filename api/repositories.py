@@ -1,4 +1,4 @@
-"""Data access: Postgres (metadata, interactions) and Qdrant (precomputed user and item vectors).
+"""Data access: Postgres (metadata, interactions) and Qdrant (precomputed user and item vectors with payload).
 
 Where this file sits:
 
@@ -40,10 +40,10 @@ class Repository:
     def ping(self) -> None:
         """Raise if either store is unreachable or a vector collection is missing.
         Returns nothing on success. Called by GET /health in routes.py."""
-        with self.pool.connection() as conn:
+        with self.pool.connection() as conn: # .pool.connection() automatically raise if there's a connection failure so we don't have to manually create an if/raise
             conn.execute("SELECT 1")
         for collection in (self.item_collection, self.user_collection):
-            if not self.qdrant.collection_exists(collection):
+            if not self.qdrant.collection_exists(collection): # .qdrant.collection_exists() automatically raise if there's a connection failure so we don't have to manually create an if/raise
                 raise RuntimeError(f"Qdrant collection '{collection}' does not exist")
 
     def index_info(self, collection: str) -> tuple[int, str | None] | None:

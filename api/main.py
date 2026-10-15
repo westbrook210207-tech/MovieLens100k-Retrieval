@@ -33,8 +33,10 @@ from config import get_settings
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("api")
 
-BACKEND_TIMEOUT_SECONDS = 5
-
+BACKEND_TIMEOUT_SECONDS = 5 # how long the API waits for one connection or one reply from Postgres or Qdrant before giving up.
+                            # This is different from interval inside compose.yaml
+                            # Interval is services/containers healthcheck
+                            # BACKEND_TIMEOUT_SECONDS is connection/reply healthcheck
 
 def check_index(repository: Repository) -> str:
     """Startup guard: refuse to serve unless the vector index is complete and consistent.
