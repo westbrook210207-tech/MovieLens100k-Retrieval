@@ -119,8 +119,8 @@ async def log_requests(request: Request, call_next):
     start = time.perf_counter()
     status = 500
     try:
-        response = await call_next(request)
-        status = response.status_code
+        response = await call_next(request) # call_next runs the next layer (routing -> get_service -> endpoint)
+        status = response.status_code # Overwrite the 500
         return response
     finally:
         logger.info(json.dumps({
