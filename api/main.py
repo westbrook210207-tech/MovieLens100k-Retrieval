@@ -1,4 +1,4 @@
-"""FastAPI application. Run: python -m uvicorn api.main:app
+"""FastAPI application. Run: python -m uvicorn api.main:app --reload
 
 Online retrieval only: the API reads vectors that training/index.py precomputed into
 Qdrant. It does not import PyTorch or load the model. Startup connects to Postgres and
@@ -101,11 +101,8 @@ async def lifespan(app: FastAPI):
             raise RuntimeError(f"Cannot reach Qdrant at {settings.qdrant_url}. "
                                "Is `docker compose up -d` running?") from error
         warn_if_index_is_stale(run_id)
-        app.state.service = RecommendationService(repository, model_run_id=run_id)
-        for parameter in app.openapi()["paths"]["/users/{user_id}/recommendations"]["get"]["parameters"]:
-            if parameter["name"] == "user_id":
-                parameter["schema"]["maximum"] = app.state.service.max_user_id
-        yield
+        app.state.service = RecommendationService(repository, model_run_id=run_id) # Build service object
+        yield # Server runs here
     finally:
         pool.close()
         qdrant.close()

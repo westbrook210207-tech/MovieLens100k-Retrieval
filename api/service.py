@@ -46,5 +46,5 @@ class RecommendationService:
         missing = [item_id for item_id, _ in hits if item_id not in metadata]
         if missing:
             logger.warning("items in Qdrant but not in Postgres: %s; re-run `python -m training.index`", missing)
-        return [RecommendedItem(item_id=item_id, score=score, **metadata[item_id])
+        return [RecommendedItem(item_id=item_id, score=score, **metadata[item_id]) 
                 for item_id, score in hits if item_id in metadata]

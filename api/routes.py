@@ -12,7 +12,7 @@ logger = logging.getLogger("api")
 router = APIRouter()
 
 
-def get_service(request: Request) -> RecommendationService:
+def get_service(request: Request) -> RecommendationService: # Returns the service object built in main.py
     return request.app.state.service
 
 
@@ -22,7 +22,7 @@ Service = Annotated[RecommendationService, Depends(get_service)]
 @router.get("/health", response_model=HealthResponse)
 def health(service: Service) -> HealthResponse:
     try:
-        service.repository.ping()
+        service.repository.ping() # healthcheck 2 databases
     except Exception:
         logger.exception("health check failed")
         raise HTTPException(status_code=503, detail="A backing service is unavailable")
@@ -32,7 +32,7 @@ def health(service: Service) -> HealthResponse:
 @router.get("/users/{user_id}/recommendations", response_model=RecommendationResponse)
 def recommendations(
     service: Service,
-    user_id: Annotated[int, Path(ge=1)],
+    user_id: Annotated[int, Path(ge=1, le = 943)],
     k: Annotated[int, Query(ge=1, le=100)] = 10,
 ) -> RecommendationResponse:
     if user_id > service.max_user_id:
