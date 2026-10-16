@@ -38,7 +38,9 @@ class Settings(BaseSettings):
         return make_conninfo(host=self.pg_host, port=self.pg_port, dbname=self.pg_db,
                              user=self.pg_user, password=password)
 
-
+# @lru_cache makes config.py build the Settings once and hand back that same object on every later call.
+# Without @lru_cache: every call runs Settings() again, which means reading .env, 
+# reading the environment variables and validating everything with Pydantic, all over again.
 @lru_cache
 def get_settings() -> Settings:
     """Shared Settings instance. lru_cache on a no-argument function runs the body once
