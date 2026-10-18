@@ -30,7 +30,8 @@ class RecommendationService:
         self.model_run_id = model_run_id
         self.max_user_id: int = repository.max_user_id()
 
-    def recommend(self, user_id: int, k: int) -> list[RecommendedItem]:
+    def recommend(self, user_id: int, k: int) -> list[RecommendedItem]: # This function is basically just the caller to call repositories.py
+                                                                        # to return all the data for response body, repositories.py is the one who actually do the work
         """Top-k recommendations for one user, best first.
 
         user_id: raw MovieLens user ID. k: how many items (routes.py guarantees 1..100).
