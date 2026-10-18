@@ -4,9 +4,9 @@ No model runs here. User and item vectors are computed offline by training/index
 
 Where this file sits:
 
-    routes.py (HTTP) -> service.py (the recipe) -> repositories.py (Postgres / Qdrant calls)
+    routes.py (HTTP) -> recommender.py (the recipe) -> repositories.py (Postgres / Qdrant calls)
 
-The service decides WHAT happens and in which order. It contains no SQL, no Qdrant calls
+The recommender decides WHAT happens and in which order. It contains no SQL, no Qdrant calls
 and no HTTP. Because of that it can be tested with a fake repository and no running
 database, which is exactly what tests/test_api.py does with FakeRepository.
 

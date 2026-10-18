@@ -7,10 +7,10 @@ missing or inconsistent.
 
 Where this file sits (one request, left to right):
 
-    client -> log_requests (here) -> routes.py -> service.py -> repositories.py -> Postgres / Qdrant
+    client -> log_requests (here) -> routes.py -> recommender.py -> repositories.py -> Postgres / Qdrant
 
 This file is the wiring. It does three things:
-  1. lifespan()      at startup: open the connections, check the index, build the service.
+  1. lifespan()      at startup: open the connections, check the index, build the recommender.
                      at shutdown: close the connections.
   2. app             the FastAPI object that uvicorn serves.
   3. log_requests()  write one log line for every HTTP request.
@@ -27,7 +27,7 @@ from qdrant_client import QdrantClient
 
 from api.repositories import Repository
 from api.routes import router
-from api.service import RecommendationService
+from api.recommender import RecommendationService
 from config import get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI):
             raise RuntimeError(f"Cannot reach Qdrant at {settings.qdrant_url}. "
                                "Is `docker compose up -d` running?") from error
         warn_if_index_is_stale(run_id)
-        app.state.service = RecommendationService(repository, model_run_id=run_id) # Build service object
+        app.state.recommender = RecommendationService(repository, model_run_id=run_id) # Build recommender object
         yield # Server runs here
     finally:
         pool.close()
@@ -119,7 +119,7 @@ async def log_requests(request: Request, call_next):
     start = time.perf_counter()
     status = 500
     try:
-        response = await call_next(request) # call_next runs the next layer (routing -> get_service -> endpoint)
+        response = await call_next(request) # call_next runs the next layer (routing -> get_recommender -> endpoint)
         status = response.status_code # Overwrite the 500
         return response
     finally:

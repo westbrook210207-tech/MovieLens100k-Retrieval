@@ -2,11 +2,11 @@
 
 Where this file sits:
 
-    routes.py -> service.py -> repositories.py (here) -> Postgres / Qdrant
+    routes.py -> recommender.py -> repositories.py (here) -> Postgres / Qdrant
 
 This is the only file in api/ that contains SQL or Qdrant client calls (the "repository
 pattern"). Each method answers one question and returns plain Python values (lists, tuples,
-dicts), so the service never handles a database cursor or a Qdrant object.
+dicts), so the recommender never handles a database cursor or a Qdrant object.
 
 Qdrant vocabulary used below:
     collection  a named set of points, comparable to a table. There are two: item vectors
