@@ -168,6 +168,7 @@ def main() -> None:
                     candidates = torch.cat([batch_lists, batch_pos.expand(len(batch), -1)], dim=1) # Film IDs of all 277 logit cols of each row: the 21 of batch_lists (1st einsum) + the 256 batch_pos (2nd einsum)
                                                                                                     # batch_pos.expand(256, -1) repeats the 256 in-batch films for every row, giving (256, 256). -1 means keep that size
                                                                                                     # dim=1 glues them side by side, giving (256, 277), same order as the logits in info_nce
+                                                                                                    # So basically candidate is a matrix of film IDs, with 256 rows as 256 ratings in 1 batch and 277 as 277 movies of 1 row
                     correction = log_expected_count[candidates] # Looks up logQ(i) of the film in each of the 277 cols, giving (256, 277). info_nce does logits - correction
 
                 # Loss pass in all user ID and movie ID in 1 batch of training into encoders, compute embeddings from those IDs
